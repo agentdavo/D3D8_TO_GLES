@@ -1,0 +1,1246 @@
+// src/d3d8_to_gles.c
+#include "d3d8_to_gles.h"
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+#ifdef D3D8_GLES_LOGGING
+#include <stdio.h>
+#include <stdarg.h>
+void d3d8_gles_log(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+}
+#endif
+
+// Helper: Map Direct3D render state to OpenGL ES
+static void set_render_state(GLES_Device *gles, D3DRENDERSTATETYPE state, DWORD value) {
+    switch (state) {
+        case D3DRS_ZENABLE:
+            gles->depth_test = value;
+            if (value) glEnable(GL_DEPTH_TEST);
+            else glDisable(GL_DEPTH_TEST);
+            break;
+        case D3DRS_CULLMODE:
+            gles->cull_face = (value != D3DCULL_NONE);
+            if (gles->cull_face) {
+                glEnable(GL_CULL_FACE);
+                gles->cull_mode = (value == D3DCULL_CW) ? GL_BACK : GL_FRONT;
+                glCullFace(gles->cull_mode);
+            } else {
+                glDisable(GL_CULL_FACE);
+            }
+            break;
+        case D3DRS_ALPHABLENDENABLE:
+            gles->blend = value;
+            if (value) glEnable(GL_BLEND);
+            else glDisable(GL_BLEND);
+            break;
+        default:
+            d3d8_gles_log("Unsupported render state: %d\n", state);
+    }
+}
+
+// Helper: Map D3DPRESENT_PARAMETERS to EGL config
+static EGLConfig choose_egl_config(EGLDisplay display, D3DPRESENT_PARAMETERS *params) {
+    EGLint config_attributes[] = {
+        EGL_RED_SIZE, (params->BackBufferFormat == D3DFMT_A8R8G8B8 || params->BackBufferFormat == D3DFMT_X8R8G8B8) ? 8 : 5,
+        EGL_GREEN_SIZE, (params->BackBufferFormat == D3DFMT_A8R8G8B8 || params->BackBufferFormat == D3DFMT_X8R8G8B8) ? 8 : 6,
+        EGL_BLUE_SIZE, (params->BackBufferFormat == D3DFMT_A8R8G8B8 || params->BackBufferFormat == D3DFMT_X8R8G8B8) ? 8 : 5,
+        EGL_ALPHA_SIZE, (params->BackBufferFormat == D3DFMT_A8R8G8B8) ? 8 : 0,
+        EGL_DEPTH_SIZE, params->EnableAutoDepthStencil ? 16 : 0,
+        EGL_STENCIL_SIZE, params->EnableAutoDepthStencil ? 8 : 0,
+        EGL_SURFACE_TYPE, params->Windowed ? EGL_WINDOW_BIT : EGL_PBUFFER_BIT,
+        EGL_RENDERABLE_TYPE, EGL_OPENGL_ES_BIT,
+        EGL_SAMPLES, params->MultiSampleType >= D3DMULTISAMPLE_2_SAMPLES ? params->MultiSampleType : 0,
+        EGL_NONE
+    };
+
+    EGLConfig config;
+    EGLint num_configs;
+    if (!eglChooseConfig(display, config_attributes, &config, 1, &num_configs) || num_configs == 0) {
+        d3d8_gles_log("Failed to choose EGL config\n");
+        return NULL;
+    }
+    return config;
+}
+
+// Helper: Map OpenGL ES 1.1 capabilities to D3DCAPS8
+static void fill_d3d_caps(D3DCAPS8 *pCaps, D3DDEVTYPE DeviceType) {
+    memset(pCaps, 0, sizeof(D3DCAPS8));
+    pCaps->DeviceType = DeviceType;
+    pCaps->AdapterOrdinal = D3DADAPTER_DEFAULT;
+    pCaps->Caps = D3DCAPS_READ_SCANLINE;
+    pCaps->Caps2 = D3DCAPS2_DYNAMICTEXTURES | (DeviceType == D3DDEVTYPE_REF ? 0 : D3DCAPS2_CANRENDERWINDOWED);
+    pCaps->PresentationIntervals = D3DPRESENT_INTERVAL_IMMEDIATE | D3DPRESENT_INTERVAL_ONE;
+    pCaps->DevCaps = D3DDEVCAPS_EXECUTESYSTEMMEMORY | D3DDEVCAPS_TLVERTEXSYSTEMMEMORY |
+                     D3DDEVCAPS_TEXTURESYSTEMMEMORY | D3DDEVCAPS_DRAWPRIMTLVERTEX |
+                     D3DDEVCAPS_HWRASTERIZATION | (DeviceType == D3DDEVTYPE_REF ? 0 : D3DDEVCAPS_PUREDEVICE);
+    pCaps->PrimitiveMiscCaps = D3DPMISCCAPS_MASKZ | D3DPMISCCAPS_CULLNONE |
+                               D3DPMISCCAPS_CULLCW | D3DPMISCCAPS_CULLCCW |
+                               D3DPMISCCAPS_COLORWRITEENABLE;
+    pCaps->RasterCaps = D3DPRASTERCAPS_DITHER | D3DPRASTERCAPS_ZTEST |
+                        D3DPRASTERCAPS_FOGVERTEX | D3DPRASTERCAPS_MIPMAPLODBIAS;
+    pCaps->ZCmpCaps = pCaps->AlphaCmpCaps = D3DPCMPCAPS_NEVER | D3DPCMPCAPS_LESS |
+                                            D3DPCMPCAPS_EQUAL | D3DPCMPCAPS_LESSEQUAL |
+                                            D3DPCMPCAPS_GREATER | D3DPCMPCAPS_NOTEQUAL |
+                                            D3DPCMPCAPS_GREATEREQUAL | D3DPCMPCAPS_ALWAYS;
+    pCaps->SrcBlendCaps = pCaps->DestBlendCaps = D3DPBLENDCAPS_ZERO | D3DPBLENDCAPS_ONE |
+                                                 D3DPBLENDCAPS_SRCCOLOR | D3DPBLENDCAPS_INVSRCCOLOR |
+                                                 D3DPBLENDCAPS_SRCALPHA | D3DPBLENDCAPS_INVSRCALPHA |
+                                                 D3DPBLENDCAPS_DESTALPHA | D3DPBLENDCAPS_INVDESTALPHA |
+                                                 D3DPBLENDCAPS_SRCALPHASAT;
+    pCaps->ShadeCaps = D3DPSHADECAPS_COLORGOURAUDRGB | D3DPSHADECAPS_ALPHAGOURAUDBLEND |
+                       D3DPSHADECAPS_FOGGOURAUD;
+    GLint max_texture_size;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_texture_size);
+    pCaps->MaxTextureWidth = pCaps->MaxTextureHeight = max_texture_size;
+    pCaps->TextureCaps = D3DPTEXTURECAPS_PERSPECTIVE | D3DPTEXTURECAPS_ALPHA |
+                         D3DPTEXTURECAPS_MIPMAP | D3DPTEXTURECAPS_CUBEMAP;
+    pCaps->TextureFilterCaps = pCaps->CubeTextureFilterCaps = D3DPTFILTERCAPS_MINFPOINT |
+                                                             D3DPTFILTERCAPS_MINFLINEAR |
+                                                             D3DPTFILTERCAPS_MIPFPOINT |
+                                                             D3DPTFILTERCAPS_MIPFLINEAR |
+                                                             D3DPTFILTERCAPS_MAGFPOINT |
+                                                             D3DPTFILTERCAPS_MAGFLINEAR;
+    pCaps->TextureAddressCaps = D3DPTADDRESSCAPS_WRAP | D3DPTADDRESSCAPS_MIRROR |
+                                D3DPTADDRESSCAPS_CLAMP | D3DPTADDRESSCAPS_INDEPENDENTUV;
+    pCaps->StencilCaps = D3DSTENCILCAPS_KEEP | D3DSTENCILCAPS_ZERO |
+                         D3DSTENCILCAPS_REPLACE | D3DSTENCILCAPS_INCRSAT |
+                         D3DSTENCILCAPS_DECRSAT | D3DSTENCILCAPS_INVERT |
+                         D3DSTENCILCAPS_INCR | D3DSTENCILCAPS_DECR;
+    pCaps->TextureOpCaps = D3DTEXOPCAPS_DISABLE | D3DTEXOPCAPS_SELECTARG1 |
+                           D3DTEXOPCAPS_SELECTARG2 | D3DTEXOPCAPS_MODULATE |
+                           D3DTEXOPCAPS_MODULATE2X | D3DTEXOPCAPS_ADD;
+    pCaps->FVFCaps = D3DFVFCAPS_TEXCOORDCOUNTMASK & 0x8;
+    pCaps->VertexProcessingCaps = D3DVTXPCAPS_TEXGEN | D3DVTXPCAPS_MATERIALSOURCE7 |
+                                  D3DVTXPCAPS_DIRECTIONALLIGHTS | D3DVTXPCAPS_LOCALVIEWER;
+    pCaps->MaxActiveLights = 8;
+    pCaps->MaxUserClipPlanes = 0;
+    pCaps->MaxVertexBlendMatrices = 4;
+    pCaps->MaxStreams = 1;
+    pCaps->MaxStreamStride = 256;
+    pCaps->VertexShaderVersion = D3DVS_VERSION(1, 1);
+    pCaps->MaxVertexShaderConst = 96;
+    pCaps->PixelShaderVersion = 0;
+    pCaps->MaxPixelShaderValue = 0.0f;
+    pCaps->MaxTextureBlendStages = 2;
+    pCaps->MaxSimultaneousTextures = 2;
+    pCaps->MaxPrimitiveCount = 65535;
+    pCaps->MaxVertexIndex = 65535;
+    pCaps->MaxPointSize = 64.0f;
+}
+
+// Helper: Convert Direct3D matrix to OpenGL (left-handed to right-handed, z=[0,1] to [-1,1])
+static void d3d_to_gl_matrix(GLfloat *gl_matrix, const D3DXMATRIX *d3d_matrix) {
+    // Transpose and adjust for coordinate system differences
+    gl_matrix[0] = d3d_matrix->_11; gl_matrix[4] = d3d_matrix->_21; gl_matrix[8] = d3d_matrix->_31; gl_matrix[12] = d3d_matrix->_41;
+    gl_matrix[1] = d3d_matrix->_12; gl_matrix[5] = d3d_matrix->_22; gl_matrix[9] = d3d_matrix->_32; gl_matrix[13] = d3d_matrix->_42;
+    gl_matrix[2] = -d3d_matrix->_13; gl_matrix[6] = -d3d_matrix->_23; gl_matrix[10] = -d3d_matrix->_33; gl_matrix[14] = -d3d_matrix->_43;
+    gl_matrix[3] = d3d_matrix->_14; gl_matrix[7] = d3d_matrix->_24; gl_matrix[11] = d3d_matrix->_34; gl_matrix[15] = d3d_matrix->_44;
+}
+
+// Helper: Setup vertex attributes based on FVF
+static void setup_vertex_attributes(DWORD fvf, BYTE *data, UINT stride) {
+    GLint offset = 0;
+    if (fvf & D3DFVF_XYZ) {
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glVertexPointer(3, GL_FLOAT, stride, data + offset);
+        offset += 12;
+    } else {
+        glDisableClientState(GL_VERTEX_ARRAY);
+    }
+    if (fvf & D3DFVF_NORMAL) {
+        glEnableClientState(GL_NORMAL_ARRAY);
+        glNormalPointer(GL_FLOAT, stride, data + offset);
+        offset += 12;
+    } else {
+        glDisableClientState(GL_NORMAL_ARRAY);
+    }
+    // Add support for other FVF components (e.g., D3DFVF_DIFFUSE, D3DFVF_TEX1) as needed
+}
+
+// Math functions
+D3DXMATRIX* WINAPI D3DXMatrixIdentity(D3DXMATRIX *pOut) {
+    memset(pOut, 0, sizeof(D3DXMATRIX));
+    pOut->_11 = pOut->_22 = pOut->_33 = pOut->_44 = 1.0f;
+    return pOut;
+}
+
+D3DXMATRIX* WINAPI D3DXMatrixMultiply(D3DXMATRIX *pOut, CONST D3DXMATRIX *pM1, CONST D3DXMATRIX *pM2) {
+    D3DXMATRIX result;
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            result.m[i][j] = pM1->m[i][0] * pM2->m[0][j] +
+                             pM1->m[i][1] * pM2->m[1][j] +
+                             pM1->m[i][2] * pM2->m[2][j] +
+                             pM1->m[i][3] * pM2->m[3][j];
+        }
+    }
+    *pOut = result;
+    return pOut;
+}
+
+D3DXMATRIX* WINAPI D3DXMatrixLookAtLH(D3DXMATRIX *pOut, CONST D3DXVECTOR3 *pEye, CONST D3DXVECTOR3 *pAt, CONST D3DXVECTOR3 *pUp) {
+    D3DXVECTOR3 zaxis, xaxis, yaxis;
+    D3DXVec3Subtract(&zaxis, pAt, pEye);
+    D3DXVec3Normalize(&zaxis, &zaxis);
+    D3DXVec3Cross(&xaxis, pUp, &zaxis);
+    D3DXVec3Normalize(&xaxis, &xaxis);
+    D3DXVec3Cross(&yaxis, &zaxis, &xaxis);
+
+    D3DXMatrixIdentity(pOut);
+    pOut->_11 = xaxis.x; pOut->_12 = yaxis.x; pOut->_13 = zaxis.x;
+    pOut->_21 = xaxis.y; pOut->_22 = yaxis.y; pOut->_23 = zaxis.y;
+    pOut->_31 = xaxis.z; pOut->_32 = yaxis.z; pOut->_33 = zaxis.z;
+    pOut->_41 = -D3DXVec3Dot(&xaxis, pEye);
+    pOut->_42 = -D3DXVec3Dot(&yaxis, pEye);
+    pOut->_43 = -D3DXVec3Dot(&zaxis, pEye);
+    return pOut;
+}
+
+D3DXMATRIX* WINAPI D3DXMatrixPerspectiveFovLH(D3DXMATRIX *pOut, FLOAT fovy, FLOAT Aspect, FLOAT zn, FLOAT zf) {
+    float yscale = 1.0f / tanf(fovy / 2.0f);
+    float xscale = yscale / Aspect;
+    D3DXMatrixIdentity(pOut);
+    pOut->_11 = xscale;
+    pOut->_22 = yscale;
+    pOut->_33 = zf / (zf - zn);
+    pOut->_34 = 1.0f;
+    pOut->_43 = -zn * zf / (zf - zn);
+    pOut->_44 = 0.0f;
+    return pOut;
+}
+
+D3DXVECTOR3* WINAPI D3DXVec3Normalize(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV) {
+    float length = sqrtf(pV->x * pV->x + pV->y * pV->y + pV->z * pV->z);
+    if (length == 0.0f) {
+        *pOut = *pV;
+        return pOut;
+    }
+    pOut->x = pV->x / length;
+    pOut->y = pV->y / length;
+    pOut->z = pV->z / length;
+    return pOut;
+}
+
+D3DXVECTOR3* WINAPI D3DXVec3TransformCoord(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV, CONST D3DXMATRIX *pM) {
+    D3DXVECTOR4 temp = { pV->x, pV->y, pV->z, 1.0f };
+    pOut->x = temp.x * pM->_11 + temp.y * pM->_21 + temp.z * pM->_31 + temp.w * pM->_41;
+    pOut->y = temp.x * pM->_12 + temp.y * pM->_22 + temp.z * pM->_32 + temp.w * pM->_42;
+    pOut->z = temp.x * pM->_13 + temp.y * pM->_23 + temp.z * pM->_33 + temp.w * pM->_43;
+    float w = temp.x * pM->_14 + temp.y * pM->_24 + temp.z * pM->_34 + temp.w * pM->_44;
+    if (w != 0.0f) {
+        pOut->x /= w;
+        pOut->y /= w;
+        pOut->z /= w;
+    }
+    return pOut;
+}
+
+// ID3DXMatrixStack methods
+static HRESULT D3DAPI d3dx_matrix_stack_query_interface(ID3DXMatrixStack *This, REFIID riid, LPVOID *ppvObj) {
+    return D3DERR_INVALIDCALL;
+}
+
+static ULONG D3DAPI d3dx_matrix_stack_add_ref(ID3DXMatrixStack *This) { return 1; }
+static ULONG D3DAPI d3dx_matrix_stack_release(ID3DXMatrixStack *This) {
+    free(This->stack);
+    free(This);
+    return 0;
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_pop(ID3DXMatrixStack *This) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    This->top--;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_push(ID3DXMatrixStack *This) {
+    if (This->top >= This->capacity) {
+        DWORD new_capacity = This->capacity ? This->capacity * 2 : 16;
+        D3DXMATRIX *new_stack = realloc(This->stack, new_capacity * sizeof(D3DXMATRIX));
+        if (!new_stack) return D3DERR_OUTOFVIDEOMEMORY;
+        This->stack = new_stack;
+        This->capacity = new_capacity;
+    }
+    if (This->top > 0) This->stack[This->top] = This->stack[This->top - 1];
+    else D3DXMatrixIdentity(&This->stack[This->top]);
+    This->top++;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_load_identity(ID3DXMatrixStack *This) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    D3DXMatrixIdentity(&This->stack[This->top - 1]);
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_load_matrix(ID3DXMatrixStack *This, CONST D3DXMATRIX *pM) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    This->stack[This->top - 1] = *pM;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_mult_matrix(ID3DXMatrixStack *This, CONST D3DXMATRIX *pM) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    D3DXMatrixMultiply(&This->stack[This->top - 1], &This->stack[This->top - 1], pM);
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_mult_matrix_local(ID3DXMatrixStack *This, CONST D3DXMATRIX *pM) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    D3DXMATRIX temp;
+    D3DXMatrixMultiply(&temp, pM, &This->stack[This->top - 1]);
+    This->stack[This->top - 1] = temp;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_rotate_axis(ID3DXMatrixStack *This, CONST D3DXVECTOR3 *pV, FLOAT Angle) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    D3DXMATRIX rot;
+    D3DXMatrixRotationAxis(&rot, pV, Angle);
+    return d3dx_matrix_stack_mult_matrix(This, &rot);
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_rotate_axis_local(ID3DXMatrixStack *This, CONST D3DXVECTOR3 *pV, FLOAT Angle) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    D3DXMATRIX rot;
+    D3DXMatrixRotationAxis(&rot, pV, Angle);
+    return d3dx_matrix_stack_mult_matrix_local(This, &rot);
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_rotate_yaw_pitch_roll(ID3DXMatrixStack *This, FLOAT Yaw, FLOAT Pitch, FLOAT Roll) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    D3DXMATRIX rot;
+    D3DXMatrixRotationYawPitchRoll(&rot, Yaw, Pitch, Roll);
+    return d3dx_matrix_stack_mult_matrix(This, &rot);
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_rotate_yaw_pitch_roll_local(ID3DXMatrixStack *This, FLOAT Yaw, FLOAT Pitch, FLOAT Roll) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    D3DXMATRIX rot;
+    D3DXMatrixRotationYawPitchRoll(&rot, Yaw, Pitch, Roll);
+    return d3dx_matrix_stack_mult_matrix_local(This, &rot);
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_scale(ID3DXMatrixStack *This, FLOAT x, FLOAT y, FLOAT z) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    D3DXMATRIX scale;
+    D3DXMatrixScaling(&scale, x, y, z);
+    return d3dx_matrix_stack_mult_matrix(This, &scale);
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_scale_local(ID3DXMatrixStack *This, FLOAT x, FLOAT y, FLOAT z) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    D3DXMATRIX scale;
+    D3DXMatrixScaling(&scale, x, y, z);
+    return d3dx_matrix_stack_mult_matrix_local(This, &scale);
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_translate(ID3DXMatrixStack *This, FLOAT x, FLOAT y, FLOAT z) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    D3DXMATRIX trans;
+    D3DXMatrixTranslation(&trans, x, y, z);
+    return d3dx_matrix_stack_mult_matrix(This, &trans);
+}
+
+static HRESULT D3DAPI d3dx_matrix_stack_translate_local(ID3DXMatrixStack *This, FLOAT x, FLOAT y, FLOAT z) {
+    if (This->top == 0) return D3DERR_INVALIDCALL;
+    D3DXMATRIX trans;
+    D3DXMatrixTranslation(&trans, x, y, z);
+    return d3dx_matrix_stack_mult_matrix_local(This, &trans);
+}
+
+static D3DXMATRIX* d3dx_matrix_stack_get_top(ID3DXMatrixStack *This) {
+    if (This->top == 0) return NULL;
+    return &This->stack[This->top - 1];
+}
+
+// ID3DXMesh methods
+static HRESULT D3DAPI d3dx_mesh_query_interface(ID3DXMesh *This, REFIID iid, void **ppv) {
+    return D3DERR_INVALIDCALL;
+}
+
+static ULONG D3DAPI d3dx_mesh_add_ref(ID3DXMesh *This) { return 1; }
+static ULONG D3DAPI d3dx_mesh_release(ID3DXMesh *This) {
+    if (This->vb) This->vb->lpVtbl->Release(This->vb);
+    if (This->ib) This->ib->lpVtbl->Release(This->ib);
+    if (This->device) This->device->lpVtbl->Release(This->device);
+    free(This->attrib_table);
+    free(This->attrib_buffer);
+    free(This);
+    return 0;
+}
+
+static HRESULT D3DAPI d3dx_mesh_draw_subset(ID3DXMesh *This, DWORD AttribId) {
+    if (AttribId >= This->attrib_table_size || !This->device) return D3DERR_INVALIDCALL;
+
+    D3DXATTRIBUTERANGE *range = &This->attrib_table[AttribId];
+    This->device->lpVtbl->SetStreamSource(This->device, 0, This->vb, D3DXGetFVFVertexSize(This->fvf));
+    This->device->lpVtbl->SetIndices(This->device, This->ib, 0);
+    This->device->gles->fvf = This->fvf;
+    This->device->gles->attrib_id = AttribId;
+    return This->device->lpVtbl->DrawIndexedPrimitive(This->device, D3DPT_TRIANGLELIST, range->VertexStart,
+                                                     range->VertexCount, range->FaceStart * 3, range->FaceCount);
+}
+
+static DWORD D3DAPI d3dx_mesh_get_num_faces(ID3DXMesh *This) {
+    return This->num_faces;
+}
+
+static DWORD D3DAPI d3dx_mesh_get_num_vertices(ID3DXMesh *This) {
+    return This->num_vertices;
+}
+
+static DWORD D3DAPI d3dx_mesh_get_fvf(ID3DXMesh *This) {
+    return This->fvf;
+}
+
+static HRESULT D3DAPI d3dx_mesh_get_declaration(ID3DXMesh *This, DWORD Declaration[MAX_FVF_DECL_SIZE]) {
+    return D3DXDeclaratorFromFVF(This->fvf, Declaration);
+}
+
+static DWORD D3DAPI d3dx_mesh_get_options(ID3DXMesh *This) {
+    return This->options;
+}
+
+static HRESULT D3DAPI d3dx_mesh_get_device(ID3DXMesh *This, LPDIRECT3DDEVICE8 *ppDevice) {
+    *ppDevice = This->device;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3dx_mesh_clone_mesh_fvf(ID3DXMesh *This, DWORD Options, DWORD FVF, LPDIRECT3DDEVICE8 pD3DDevice, LPD3DXMESH *ppCloneMesh) {
+    return D3DXERR_NOTAVAILABLE;
+}
+
+static HRESULT D3DAPI d3dx_mesh_clone_mesh(ID3DXMesh *This, DWORD Options, CONST DWORD *pDeclaration, LPDIRECT3DDEVICE8 pD3DDevice, LPD3DXMESH *ppCloneMesh) {
+    return D3DXERR_NOTAVAILABLE;
+}
+
+static HRESULT D3DAPI d3dx_mesh_get_vertex_buffer(ID3DXMesh *This, LPDIRECT3DVERTEXBUFFER8 *ppVB) {
+    *ppVB = This->vb;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3dx_mesh_get_index_buffer(ID3DXMesh *This, LPDIRECT3DINDEXBUFFER8 *ppIB) {
+    *ppIB = This->ib;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3dx_mesh_lock_vertex_buffer(ID3DXMesh *This, DWORD Flags, BYTE **ppData) {
+    return This->vb->lpVtbl->Lock(This->vb, 0, 0, ppData, Flags);
+}
+
+static HRESULT D3DAPI d3dx_mesh_unlock_vertex_buffer(ID3DXMesh *This) {
+    return This->vb->lpVtbl->Unlock(This->vb);
+}
+
+static HRESULT D3DAPI d3dx_mesh_lock_index_buffer(ID3DXMesh *This, DWORD Flags, BYTE **ppData) {
+    return This->ib->lpVtbl->Lock(This->ib, 0, 0, ppData, Flags);
+}
+
+static HRESULT D3DAPI d3dx_mesh_unlock_index_buffer(ID3DXMesh *This) {
+    return This->ib->lpVtbl->Unlock(This->ib);
+}
+
+static HRESULT D3DAPI d3dx_mesh_get_attribute_table(ID3DXMesh *This, D3DXATTRIBUTERANGE *pAttribTable, DWORD *pAttribTableSize) {
+    if (pAttribTableSize) *pAttribTableSize = This->attrib_table_size;
+    if (pAttribTable && This->attrib_table) {
+        memcpy(pAttribTable, This->attrib_table, This->attrib_table_size * sizeof(D3DXATTRIBUTERANGE));
+    }
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3dx_mesh_convert_point_reps_to_adjacency(ID3DXMesh *This, CONST DWORD *pPRep, DWORD *pAdjacency) {
+    return D3DXERR_NOTAVAILABLE;
+}
+
+static HRESULT D3DAPI d3dx_mesh_convert_adjacency_to_point_reps(ID3DXMesh *This, CONST DWORD *pAdjacency, DWORD *pPRep) {
+    return D3DXERR_NOTAVAILABLE;
+}
+
+static HRESULT D3DAPI d3dx_mesh_generate_adjacency(ID3DXMesh *This, FLOAT Epsilon, DWORD *pAdjacency) {
+    return D3DXERR_NOTAVAILABLE;
+}
+
+static HRESULT D3DAPI d3dx_mesh_lock_attribute_buffer(ID3DXMesh *This, DWORD Flags, DWORD **ppData) {
+    if (!This->attrib_buffer) return D3DERR_INVALIDCALL;
+    *ppData = This->attrib_buffer;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3dx_mesh_unlock_attribute_buffer(ID3DXMesh *This) {
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3dx_mesh_optimize(ID3DXMesh *This, DWORD Flags, CONST DWORD *pAdjacencyIn, DWORD *pAdjacencyOut, DWORD *pFaceRemap, LPD3DXBUFFER *ppVertexRemap, LPD3DXMESH *ppOptMesh) {
+    return D3DXERR_NOTAVAILABLE;
+}
+
+static HRESULT D3DAPI d3dx_mesh_optimize_inplace(ID3DXMesh *This, DWORD Flags, CONST DWORD *pAdjacencyIn, DWORD *pAdjacencyOut, DWORD *pFaceRemap, LPD3DXBUFFER *ppVertexRemap) {
+    return D3DXERR_NOTAVAILABLE;
+}
+
+// IDirect3D8 methods
+static HRESULT D3DAPI d3d8_query_interface(IDirect3D8 *This, REFIID riid, void **ppvObj) {
+    return D3DERR_INVALIDCALL;
+}
+
+static ULONG D3DAPI d3d8_add_ref(IDirect3D8 *This) { return 1; }
+static ULONG D3DAPI d3d8_release(IDirect3D8 *This) { free(This); return 0; }
+static HRESULT D3DAPI d3d8_register_software_device(IDirect3D8 *This, void *pInitializeFunction) { return D3DERR_NOTAVAILABLE; }
+static UINT D3DAPI d3d8_get_adapter_count(IDirect3D8 *This) { return 1; }
+static HRESULT D3DAPI d3d8_get_adapter_identifier(IDirect3D8 *This, UINT Adapter, DWORD Flags, D3DADAPTER_IDENTIFIER8 *pIdentifier) { return D3DERR_NOTAVAILABLE; }
+static UINT D3DAPI d3d8_get_adapter_mode_count(IDirect3D8 *This, UINT Adapter) { return 1; }
+static HRESULT D3DAPI d3d8_enum_adapter_modes(IDirect3D8 *This, UINT Adapter, UINT Mode, D3DDISPLAYMODE *pMode) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_get_adapter_display_mode(IDirect3D8 *This, UINT Adapter, D3DDISPLAYMODE *pMode) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_check_device_type(IDirect3D8 *This, UINT Adapter, D3DDEVTYPE CheckType, D3DFORMAT DisplayFormat, D3DFORMAT BackBufferFormat, BOOL Windowed) { return D3D_OK; }
+static HRESULT D3DAPI d3d8_check_device_format(IDirect3D8 *This, UINT Adapter, D3DDEVTYPE DeviceType, D3DFORMAT AdapterFormat, DWORD Usage, D3DRESOURCETYPE RType, D3DFORMAT CheckFormat) { return D3D_OK; }
+static HRESULT D3DAPI d3d8_check_device_multi_sample_type(IDirect3D8 *This, UINT Adapter, D3DDEVTYPE DeviceType, D3DFORMAT SurfaceFormat, BOOL Windowed, D3DMULTISAMPLE_TYPE MultiSampleType) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_check_depth_stencil_match(IDirect3D8 *This, UINT Adapter, D3DDEVTYPE DeviceType, D3DFORMAT AdapterFormat, D3DFORMAT RenderTargetFormat, D3DFORMAT DepthStencilFormat) { return D3D_OK; }
+static HRESULT D3DAPI d3d8_get_device_caps(IDirect3D8 *This, UINT Adapter, D3DDEVTYPE DeviceType, D3DCAPS8 *pCaps) {
+    fill_d3d_caps(pCaps, DeviceType);
+    return D3D_OK;
+}
+static HMONITOR D3DAPI d3d8_get_adapter_monitor(IDirect3D8 *This, UINT Adapter) { return NULL; }
+
+static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVTYPE DeviceType,
+                                        HWND hFocusWindow, DWORD BehaviorFlags,
+                                        D3DPRESENT_PARAMETERS *pPresentationParameters,
+                                        IDirect3DDevice8 **ppReturnedDeviceInterface) {
+    if (Adapter != D3DADAPTER_DEFAULT || !pPresentationParameters || DeviceType == D3DDEVTYPE_SW) {
+        return D3DERR_INVALIDCALL;
+    }
+
+    GLES_Device *gles = calloc(1, sizeof(GLES_Device));
+    if (!gles) return D3DERR_OUTOFVIDEOMEMORY;
+
+    gles->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if (!eglInitialize(gles->display, NULL, NULL)) {
+        free(gles);
+        return D3DERR_INVALIDCALL;
+    }
+
+    EGLConfig config = choose_egl_config(gles->display, pPresentationParameters);
+    if (!config) {
+        eglTerminate(gles->display);
+        free(gles);
+        return D3DERR_INVALIDCALL;
+    }
+
+    gles->surface = eglCreateWindowSurface(gles->display, config, hFocusWindow, NULL);
+    gles->context = eglCreateContext(gles->display, config, EGL_NO_CONTEXT, NULL);
+    if (!gles->surface || !gles->context || !eglMakeCurrent(gles->display, gles->surface, gles->surface, gles->context)) {
+        if (gles->context) eglDestroyContext(gles->display, gles->context);
+        if (gles->surface) eglDestroySurface(gles->display, gles->surface);
+        eglTerminate(gles->display);
+        free(gles);
+        return D3DERR_INVALIDCALL;
+    }
+
+    gles->viewport.X = 0;
+    gles->viewport.Y = 0;
+    gles->viewport.Width = pPresentationParameters->BackBufferWidth;
+    gles->viewport.Height = pPresentationParameters->BackBufferHeight;
+    gles->viewport.MinZ = 0.0f;
+    gles->viewport.MaxZ = 1.0f;
+    glViewport(0, 0, gles->viewport.Width, gles->viewport.Height);
+    D3DXMatrixIdentity(&gles->world_matrix);
+    D3DXMatrixIdentity(&gles->view_matrix);
+    D3DXMatrixIdentity(&gles->projection_matrix);
+
+    IDirect3DDevice8 *device = calloc(1, sizeof(IDirect3DDevice8) + sizeof(IDirect3DDevice8Vtbl));
+    if (!device) {
+        eglDestroyContext(gles->display, gles->context);
+        eglDestroySurface(gles->display, gles->surface);
+        eglTerminate(gles->display);
+        free(gles);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+
+    static const IDirect3DDevice8Vtbl device_vtbl = {
+        .QueryInterface = d3d8_query_interface,
+        .AddRef = d3d8_add_ref,
+        .Release = d3d8_release,
+        .TestCooperativeLevel = d3d8_test_cooperative_level,
+        .GetAvailableTextureMem = d3d8_get_available_texture_mem,
+        .ResourceManagerDiscardBytes = d3d8_resource_manager_discard_bytes,
+        .GetDirect3D = d3d8_get_direct3d,
+        .GetDeviceCaps = d3d8_get_device_caps,
+        .GetDisplayMode = d3d8_get_display_mode,
+        .GetCreationParameters = d3d8_get_creation_parameters,
+        .SetCursorProperties = d3d8_set_cursor_properties,
+        .SetCursorPosition = d3d8_set_cursor_position,
+        .ShowCursor = d3d8_show_cursor,
+        .CreateAdditionalSwapChain = d3d8_create_additional_swap_chain,
+        .Reset = d3d8_reset,
+        .Present = d3d8_present,
+        .GetBackBuffer = d3d8_get_back_buffer,
+        .GetRasterStatus = d3d8_get_raster_status,
+        .SetGammaRamp = d3d8_set_gamma_ramp,
+        .GetGammaRamp = d3d8_get_gamma_ramp,
+        .CreateVertexBuffer = d3d8_create_vertex_buffer,
+        .CreateIndexBuffer = d3d8_create_index_buffer,
+        .SetRenderState = set_render_state,
+        .BeginScene = d3d8_begin_scene,
+        .EndScene = d3d8_end_scene,
+        .SetStreamSource = d3d8_set_stream_source,
+        .SetIndices = d3d8_set_indices,
+        .SetViewport = d3d8_set_viewport,
+        .SetTransform = d3d8_set_transform,
+        .DrawIndexedPrimitive = d3d8_draw_indexed_primitive
+    };
+    device->lpVtbl = &device_vtbl;
+    device->gles = gles;
+    device->d3d8 = This;
+
+    *ppReturnedDeviceInterface = device;
+    return D3D_OK;
+}
+
+// IDirect3DDevice8 methods
+static HRESULT D3DAPI d3d8_test_cooperative_level(IDirect3DDevice8 *This) { return D3D_OK; }
+static UINT D3DAPI d3d8_get_available_texture_mem(IDirect3DDevice8 *This) { return 1024 * 1024 * 256; }
+static HRESULT D3DAPI d3d8_resource_manager_discard_bytes(IDirect3DDevice8 *This, DWORD Bytes) { return D3D_OK; }
+static HRESULT D3DAPI d3d8_get_direct3d(IDirect3DDevice8 *This, IDirect3D8 **ppD3D8) {
+    *ppD3D8 = This->d3d8;
+    return D3D_OK;
+}
+static HRESULT D3DAPI d3d8_get_device_caps(IDirect3DDevice8 *This, D3DCAPS8 *pCaps) {
+    fill_d3d_caps(pCaps, D3DDEVTYPE_HAL);
+    return D3D_OK;
+}
+static HRESULT D3DAPI d3d8_get_display_mode(IDirect3DDevice8 *This, D3DDISPLAYMODE *pMode) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_get_creation_parameters(IDirect3DDevice8 *This, D3DDEVICE_CREATION_PARAMETERS *pParameters) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_set_cursor_properties(IDirect3DDevice8 *This, UINT XHotSpot, UINT YHotSpot, IDirect3DSurface8 *pCursorBitmap) { return D3DERR_NOTAVAILABLE; }
+static void D3DAPI d3d8_set_cursor_position(IDirect3DDevice8 *This, UINT XScreenSpace, UINT YScreenSpace, DWORD Flags) {}
+static BOOL D3DAPI d3d8_show_cursor(IDirect3DDevice8 *This, BOOL bShow) { return FALSE; }
+static HRESULT D3DAPI d3d8_create_additional_swap_chain(IDirect3DDevice8 *This, D3DPRESENT_PARAMETERS *pPresentationParameters, IDirect3DSwapChain8 **pSwapChain) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_reset(IDirect3DDevice8 *This, D3DPRESENT_PARAMETERS *pPresentationParameters) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_present(IDirect3DDevice8 *This, CONST RECT *pSourceRect, CONST RECT *pDestRect, HWND hDestWindowOverride, CONST RGNDATA *pDirtyRegion) {
+    eglSwapBuffers(This->gles->display, This->gles->surface);
+    return D3D_OK;
+}
+static HRESULT D3DAPI d3d8_get_back_buffer(IDirect3DDevice8 *This, UINT BackBuffer, D3DBACKBUFFER_TYPE Type, IDirect3DSurface8 **ppBackBuffer) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_get_raster_status(IDirect3DDevice8 *This, D3DRASTER_STATUS *pRasterStatus) { return D3DERR_NOTAVAILABLE; }
+static void D3DAPI d3d8_set_gamma_ramp(IDirect3DDevice8 *This, DWORD Flags, CONST D3DGAMMARAMP *pRamp) {}
+static void D3DAPI d3d8_get_gamma_ramp(IDirect3DDevice8 *This, D3DGAMMARAMP *pRamp) {}
+static HRESULT D3DAPI d3d8_begin_scene(IDirect3DDevice8 *This) {
+    d3d8_gles_log("BeginScene\n");
+    return D3D_OK;
+}
+static HRESULT D3DAPI d3d8_end_scene(IDirect3DDevice8 *This) {
+    d3d8_gles_log("EndScene\n");
+    return D3D_OK;
+}
+static HRESULT D3DAPI d3d8_set_viewport(IDirect3DDevice8 *This, CONST D3DVIEWPORT8 *pViewport) {
+    This->gles->viewport = *pViewport;
+    glViewport(pViewport->X, pViewport->Y, pViewport->Width, pViewport->Height);
+    glDepthRange(pViewport->MinZ, pViewport->MaxZ);
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_set_transform(IDirect3DDevice8 *This, D3DTRANSFORMSTATETYPE State, CONST D3DXMATRIX *pMatrix) {
+    switch (State) {
+        case D3DTS_WORLD:
+            This->gles->world_matrix = *pMatrix;
+            break;
+        case D3DTS_VIEW:
+            This->gles->view_matrix = *pMatrix;
+            break;
+        case D3DTS_PROJECTION:
+            This->gles->projection_matrix = *pMatrix;
+            break;
+        default:
+            return D3DERR_INVALIDCALL;
+    }
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_draw_indexed_primitive(IDirect3DDevice8 *This, D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount) {
+    if (PrimitiveType != D3DPT_TRIANGLELIST) return D3DERR_NOTAVAILABLE;
+
+    // Apply transformations
+    D3DXMATRIX wvp;
+    D3DXMatrixMultiply(&wvp, &This->gles->world_matrix, &This->gles->view_matrix);
+    D3DXMatrixMultiply(&wvp, &wvp, &This->gles->projection_matrix);
+    GLfloat gl_matrix[16];
+    d3d_to_gl_matrix(gl_matrix, &wvp);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadMatrixf(gl_matrix);
+
+    // Setup vertex attributes
+    BYTE *vb_data;
+    UINT stride = D3DXGetFVFVertexSize(This->gles->fvf);
+    if (This->gles->current_vbo) {
+        glBindBuffer(GL_ARRAY_BUFFER, This->gles->current_vbo);
+        setup_vertex_attributes(This->gles->fvf, 0, stride);
+    } else {
+        return D3DERR_INVALIDCALL;
+    }
+
+    // Draw
+    GLenum mode = GL_TRIANGLES;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, This->gles->current_ibo);
+    glDrawElements(mode, PrimitiveCount * 3, GL_UNSIGNED_SHORT, (void *)(StartIndex * sizeof(WORD)));
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    return D3D_OK;
+}
+
+// Vertex/Index Buffer methods
+static HRESULT D3DAPI d3d8_create_vertex_buffer(IDirect3DDevice8 *This, UINT Length, DWORD Usage, DWORD FVF, D3DPOOL Pool, IDirect3DVertexBuffer8 **ppVertexBuffer) {
+    GLES_Buffer *buffer = calloc(1, sizeof(GLES_Buffer));
+    if (!buffer) return D3DERR_OUTOFVIDEOMEMORY;
+
+    buffer->length = Length;
+    buffer->usage = Usage;
+    buffer->fvf = FVF;
+    buffer->pool = Pool;
+
+    glGenBuffers(1, &buffer->vbo_id);
+    glBindBuffer(GL_ARRAY_BUFFER, buffer->vbo_id);
+    GLenum gl_usage = (Usage & D3DUSAGE_DYNAMIC) ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
+    glBufferData(GL_ARRAY_BUFFER, Length, NULL, gl_usage);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    IDirect3DVertexBuffer8 *vb = calloc(1, sizeof(IDirect3DVertexBuffer8) + sizeof(IDirect3DVertexBuffer8Vtbl));
+    if (!vb) {
+        glDeleteBuffers(1, &buffer->vbo_id);
+        free(buffer);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+
+    static const IDirect3DVertexBuffer8Vtbl vb_vtbl = {
+        .QueryInterface = d3d8_query_interface,
+        .AddRef = d3d8_add_ref,
+        .Release = d3d8_release,
+        .GetDevice = d3d8_vb_get_device,
+        .SetPrivateData = d3d8_vb_set_private_data,
+        .GetPrivateData = d3d8_vb_get_private_data,
+        .FreePrivateData = d3d8_vb_free_private_data,
+        .SetPriority = d3d8_vb_set_priority,
+        .GetPriority = d3d8_vb_get_priority,
+        .PreLoad = d3d8_vb_pre_load,
+        .GetType = d3d8_vb_get_type,
+        .Lock = d3d8_vb_lock,
+        .Unlock = d3d8_vb_unlock,
+        .GetDesc = d3d8_vb_get_desc
+    };
+    vb->lpVtbl = &vb_vtbl;
+    vb->buffer = buffer;
+    vb->device = This;
+
+    *ppVertexBuffer = vb;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_create_index_buffer(IDirect3DDevice8 *This, UINT Length, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DIndexBuffer8 **ppIndexBuffer) {
+    GLES_Buffer *buffer = calloc(1, sizeof(GLES_Buffer));
+    if (!buffer) return D3DERR_OUTOFVIDEOMEMORY;
+
+    buffer->length = Length;
+    buffer->usage = Usage;
+    buffer->format = Format;
+    buffer->pool = Pool;
+
+    glGenBuffers(1, &buffer->vbo_id);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer->vbo_id);
+    GLenum gl_usage = (Usage & D3DUSAGE_DYNAMIC) ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, Length, NULL, gl_usage);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    IDirect3DIndexBuffer8 *ib = calloc(1, sizeof(IDirect3DIndexBuffer8) + sizeof(IDirect3DIndexBuffer8Vtbl));
+    if (!ib) {
+        glDeleteBuffers(1, &buffer->vbo_id);
+        free(buffer);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+
+    static const IDirect3DIndexBuffer8Vtbl ib_vtbl = {
+        .QueryInterface = d3d8_query_interface,
+        .AddRef = d3d8_add_ref,
+        .Release = d3d8_release,
+        .GetDevice = d3d8_ib_get_device,
+        .SetPrivateData = d3d8_ib_set_private_data,
+        .GetPrivateData = d3d8_ib_get_private_data,
+        .FreePrivateData = d3d8_ib_free_private_data,
+        .SetPriority = d3d8_ib_set_priority,
+        .GetPriority = d3d8_ib_get_priority,
+        .PreLoad = d3d8_ib_pre_load,
+        .GetType = d3d8_ib_get_type,
+        .Lock = d3d8_ib_lock,
+        .Unlock = d3d8_ib_unlock,
+        .GetDesc = d3d8_ib_get_desc
+    };
+    ib->lpVtbl = &ib_vtbl;
+    ib->buffer = buffer;
+    ib->device = This;
+
+    *ppIndexBuffer = ib;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_set_stream_source(IDirect3DDevice8 *This, UINT StreamNumber, IDirect3DVertexBuffer8 *pStreamData, UINT Stride) {
+    if (!pStreamData) {
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        This->gles->current_vbo = 0;
+        return D3D_OK;
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, pStreamData->buffer->vbo_id);
+    This->gles->current_vbo = pStreamData->buffer->vbo_id;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_set_indices(IDirect3DDevice8 *This, IDirect3DIndexBuffer8 *pIndexData, UINT BaseVertexIndex) {
+    if (!pIndexData) {
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        This->gles->current_ibo = 0;
+        return D3D_OK;
+    }
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, pIndexData->buffer->vbo_id);
+    This->gles->current_ibo = pIndexData->buffer->vbo_id;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_vb_get_device(IDirect3DVertexBuffer8 *This, IDirect3DDevice8 **ppDevice) {
+    *ppDevice = This->device;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_vb_set_private_data(IDirect3DVertexBuffer8 *This, REFGUID refguid, CONST void *pData, DWORD SizeOfData, DWORD Flags) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_vb_get_private_data(IDirect3DVertexBuffer8 *This, REFGUID refguid, void *pData, DWORD *pSizeOfData) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_vb_free_private_data(IDirect3DVertexBuffer8 *This, REFGUID refguid) { return D3DERR_NOTAVAILABLE; }
+static DWORD D3DAPI d3d8_vb_set_priority(IDirect3DVertexBuffer8 *This, DWORD PriorityNew) { return 0; }
+static DWORD D3DAPI d3d8_vb_get_priority(IDirect3DVertexBuffer8 *This) { return 0; }
+static void D3DAPI d3d8_vb_pre_load(IDirect3DVertexBuffer8 *This) {}
+static D3DRESOURCETYPE D3DAPI d3d8_vb_get_type(IDirect3DVertexBuffer8 *This) { return D3DRTYPE_VERTEXBUFFER; }
+
+static HRESULT D3DAPI d3d8_vb_lock(IDirect3DVertexBuffer8 *This, UINT OffsetToLock, UINT SizeToLock, BYTE **ppbData, DWORD Flags) {
+    GLES_Buffer *buffer = This->buffer;
+    SizeToLock = (SizeToLock == 0) ? buffer->length : SizeToLock;
+
+    buffer->temp_buffer = malloc(SizeToLock);
+    if (!buffer->temp_buffer) return D3DERR_OUTOFVIDEOMEMORY;
+
+    *ppbData = buffer->temp_buffer + OffsetToLock;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_vb_unlock(IDirect3DVertexBuffer8 *This) {
+    GLES_Buffer *buffer = This->buffer;
+    if (!buffer->temp_buffer) return D3DERR_INVALIDCALL;
+
+    glBindBuffer(GL_ARRAY_BUFFER, buffer->vbo_id);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, buffer->length, buffer->temp_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    free(buffer->temp_buffer);
+    buffer->temp_buffer = NULL;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_vb_get_desc(IDirect3DVertexBuffer8 *This, D3DVERTEXBUFFER_DESC *pDesc) {
+    pDesc->Format = D3DFMT_VERTEXDATA;
+    pDesc->Type = D3DRTYPE_VERTEXBUFFER;
+    pDesc->Usage = This->buffer->usage;
+    pDesc->Pool = This->buffer->pool;
+    pDesc->Size = This->buffer->length;
+    pDesc->FVF = This->buffer->fvf;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_ib_get_device(IDirect3DIndexBuffer8 *This, IDirect3DDevice8 **ppDevice) {
+    *ppDevice = This->device;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_ib_set_private_data(IDirect3DIndexBuffer8 *This, REFGUID refguid, CONST void *pData, DWORD SizeOfData, DWORD Flags) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_ib_get_private_data(IDirect3DIndexBuffer8 *This, REFGUID refguid, void *pData, DWORD *pSizeOfData) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_ib_free_private_data(IDirect3DIndexBuffer8 *This, REFGUID refguid) { return D3DERR_NOTAVAILABLE; }
+static DWORD D3DAPI d3d8_ib_set_priority(IDirect3DIndexBuffer8 *This, DWORD PriorityNew) { return 0; }
+static DWORD D3DAPI d3d8_ib_get_priority(IDirect3DIndexBuffer8 *This) { return 0; }
+static void D3DAPI d3d8_ib_pre_load(IDirect3DIndexBuffer8 *This) {}
+static D3DRESOURCETYPE D3DAPI d3d8_ib_get_type(IDirect3DIndexBuffer8 *This) { return D3DRTYPE_INDEXBUFFER; }
+
+static HRESULT D3DAPI d3d8_ib_lock(IDirect3DIndexBuffer8 *This, UINT OffsetToLock, UINT SizeToLock, BYTE **ppbData, DWORD Flags) {
+    GLES_Buffer *buffer = This->buffer;
+    SizeToLock = (SizeToLock == 0) ? buffer->length : SizeToLock;
+
+    buffer->temp_buffer = malloc(SizeToLock);
+    if (!buffer->temp_buffer) return D3DERR_OUTOFVIDEOMEMORY;
+
+    *ppbData = buffer->temp_buffer + OffsetToLock;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_ib_unlock(IDirect3DIndexBuffer8 *This) {
+    GLES_Buffer *buffer = This->buffer;
+    if (!buffer->temp_buffer) return D3DERR_INVALIDCALL;
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer->vbo_id);
+    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, buffer->length, buffer->temp_buffer);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
+    free(buffer->temp_buffer);
+    buffer->temp_buffer = NULL;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_ib_get_desc(IDirect3DIndexBuffer8 *This, D3DINDEXBUFFER_DESC *pDesc) {
+    pDesc->Format = This->buffer->format;
+    pDesc->Type = D3DRTYPE_INDEXBUFFER;
+    pDesc->Usage = This->buffer->usage;
+    pDesc->Pool = This->buffer->pool;
+    pDesc->Size = This->buffer->length;
+    return D3D_OK;
+}
+
+// D3DX functions
+HRESULT WINAPI D3DXCreateBuffer(DWORD NumBytes, LPD3DXBUFFER *ppBuffer) {
+    ID3DXBuffer *buffer = calloc(1, sizeof(ID3DXBuffer) + sizeof(ID3DXBufferVtbl));
+    if (!buffer) return D3DERR_OUTOFVIDEOMEMORY;
+
+    buffer->data = calloc(1, NumBytes);
+    if (!buffer->data) {
+        free(buffer);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+    buffer->size = NumBytes;
+
+    static const ID3DXBufferVtbl buffer_vtbl = {
+        .QueryInterface = d3dx_buffer_query_interface,
+        .AddRef = d3dx_buffer_add_ref,
+        .Release = d3dx_buffer_release,
+        .GetBufferPointer = d3dx_buffer_get_buffer_pointer,
+        .GetBufferSize = d3dx_buffer_get_buffer_size
+    };
+    buffer->pVtbl = &buffer_vtbl;
+
+    *ppBuffer = buffer;
+    return D3D_OK;
+}
+
+typedef struct {
+    float x, y, z; // Position
+    float nx, ny, nz; // Normal
+} VertexPN;
+
+HRESULT WINAPI D3DXCreateBox(LPDIRECT3DDEVICE8 pDevice, FLOAT Width, FLOAT Height, FLOAT Depth, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency) {
+    if (!pDevice || Width <= 0.0f || Height <= 0.0f || Depth <= 0.0f || !ppMesh) return D3DERR_INVALIDCALL;
+
+    float hw = Width * 0.5f, hh = Height * 0.5f, hd = Depth * 0.5f;
+    VertexPN vertices[] = {
+        // Front face
+        {-hw, -hh,  hd,  0,  0,  1}, {-hw,  hh,  hd,  0,  0,  1},
+        { hw,  hh,  hd,  0,  0,  1}, { hw, -hh,  hd,  0,  0,  1},
+        // Back face
+        { hw, -hh, -hd,  0,  0, -1}, { hw,  hh, -hd,  0,  0, -1},
+        {-hw,  hh, -hd,  0,  0, -1}, {-hw, -hh, -hd,  0,  0, -1},
+        // Top face
+        {-hw,  hh,  hd,  0,  1,  0}, {-hw,  hh, -hd,  0,  1,  0},
+        { hw,  hh, -hd,  0,  1,  0}, { hw,  hh,  hd,  0,  1,  0},
+        // Bottom face
+        { hw, -hh,  hd,  0, -1,  0}, { hw, -hh, -hd,  0, -1,  0},
+        {-hw, -hh, -hd,  0, -1,  0}, {-hw, -hh,  hd,  0, -1,  0},
+        // Right face
+        { hw, -hh,  hd,  1,  0,  0}, { hw,  hh,  hd,  1,  0,  0},
+        { hw,  hh, -hd,  1,  0,  0}, { hw, -hh, -hd,  1,  0,  0},
+        // Left face
+        {-hw, -hh, -hd, -1,  0,  0}, {-hw,  hh, -hd, -1,  0,  0},
+        {-hw,  hh,  hd, -1,  0,  0}, {-hw, -hh,  hd, -1,  0,  0}
+    };
+
+    WORD indices[] = {
+        0, 1, 2, 0, 2, 3,       // Front
+        4, 5, 6, 4, 6, 7,       // Back
+        8, 9, 10, 8, 10, 11,    // Top
+        12, 13, 14, 12, 14, 15, // Bottom
+        16, 17, 18, 16, 18, 19, // Right
+        20, 21, 22, 20, 22, 23  // Left
+    };
+
+    DWORD num_vertices = 24;
+    DWORD num_faces = 12;
+    DWORD fvf = D3DFVF_XYZ | D3DFVF_NORMAL;
+    UINT vb_size = num_vertices * sizeof(VertexPN);
+    UINT ib_size = num_faces * 3 * sizeof(WORD);
+    DWORD options = D3DXMESH_MANAGED;
+
+    IDirect3DVertexBuffer8 *vb;
+    HRESULT hr = pDevice->lpVtbl->CreateVertexBuffer(pDevice, vb_size, D3DUSAGE_WRITEONLY, fvf, D3DPOOL_MANAGED, &vb);
+    if (FAILED(hr)) return hr;
+
+    BYTE *vb_data;
+    hr = vb->lpVtbl->Lock(vb, 0, vb_size, &vb_data, 0);
+    if (SUCCEEDED(hr)) {
+        memcpy(vb_data, vertices, vb_size);
+        vb->lpVtbl->Unlock(vb);
+    } else {
+        vb->lpVtbl->Release(vb);
+        return hr;
+    }
+
+    IDirect3DIndexBuffer8 *ib;
+    hr = pDevice->lpVtbl->CreateIndexBuffer(pDevice, ib_size, D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_MANAGED, &ib);
+    if (FAILED(hr)) {
+        vb->lpVtbl->Release(vb);
+        return hr;
+    }
+
+    BYTE *ib_data;
+    hr = ib->lpVtbl->Lock(ib, 0, ib_size, &ib_data, 0);
+    if (SUCCEEDED(hr)) {
+        memcpy(ib_data, indices, ib_size);
+        ib->lpVtbl->Unlock(ib);
+    } else {
+        vb->lpVtbl->Release(vb);
+        ib->lpVtbl->Release(ib);
+        return hr;
+    }
+
+    ID3DXMesh *mesh = calloc(1, sizeof(ID3DXMesh) + sizeof(ID3DXMeshVtbl));
+    if (!mesh) {
+        vb->lpVtbl->Release(vb);
+        ib->lpVtbl->Release(ib);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+
+    // Setup attribute table (single subset for simplicity)
+    mesh->attrib_table = calloc(1, sizeof(D3DXATTRIBUTERANGE));
+    if (!mesh->attrib_table) {
+        vb->lpVtbl->Release(vb);
+        ib->lpVtbl->Release(ib);
+        free(mesh);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+    mesh->attrib_table[0].AttribId = 0;
+    mesh->attrib_table[0].FaceStart = 0;
+    mesh->attrib_table[0].FaceCount = num_faces;
+    mesh->attrib_table[0].VertexStart = 0;
+    mesh->attrib_table[0].VertexCount = num_vertices;
+    mesh->attrib_table_size = 1;
+
+    // Setup attribute buffer
+    mesh->attrib_buffer = calloc(num_faces, sizeof(DWORD));
+    if (!mesh->attrib_buffer) {
+        vb->lpVtbl->Release(vb);
+        ib->lpVtbl->Release(ib);
+        free(mesh->attrib_table);
+        free(mesh);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+    for (DWORD i = 0; i < num_faces; i++) {
+        mesh->attrib_buffer[i] = 0; // Single material
+    }
+
+    static const ID3DXMeshVtbl mesh_vtbl = {
+        .QueryInterface = d3dx_mesh_query_interface,
+        .AddRef = d3dx_mesh_add_ref,
+        .Release = d3dx_mesh_release,
+        .DrawSubset = d3dx_mesh_draw_subset,
+        .GetNumFaces = d3dx_mesh_get_num_faces,
+        .GetNumVertices = d3dx_mesh_get_num_vertices,
+        .GetFVF = d3dx_mesh_get_fvf,
+        .GetDeclaration = d3dx_mesh_get_declaration,
+        .GetOptions = d3dx_mesh_get_options,
+        .GetDevice = d3dx_mesh_get_device,
+        .CloneMeshFVF = d3dx_mesh_clone_mesh_fvf,
+        .CloneMesh = d3dx_mesh_clone_mesh,
+        .GetVertexBuffer = d3dx_mesh_get_vertex_buffer,
+        .GetIndexBuffer = d3dx_mesh_get_index_buffer,
+        .LockVertexBuffer = d3dx_mesh_lock_vertex_buffer,
+        .UnlockVertexBuffer = d3dx_mesh_unlock_vertex_buffer,
+        .LockIndexBuffer = d3dx_mesh_lock_index_buffer,
+        .UnlockIndexBuffer = d3dx_mesh_unlock_index_buffer,
+        .GetAttributeTable = d3dx_mesh_get_attribute_table,
+        .ConvertPointRepsToAdjacency = d3dx_mesh_convert_point_reps_to_adjacency,
+        .ConvertAdjacencyToPointReps = d3dx_mesh_convert_adjacency_to_point_reps,
+        .GenerateAdjacency = d3dx_mesh_generate_adjacency,
+        .LockAttributeBuffer = d3dx_mesh_lock_attribute_buffer,
+        .UnlockAttributeBuffer = d3dx_mesh_unlock_attribute_buffer,
+        .Optimize = d3dx_mesh_optimize,
+        .OptimizeInplace = d3dx_mesh_optimize_inplace
+    };
+    mesh->pVtbl = &mesh_vtbl;
+    mesh->device = pDevice;
+    mesh->vb = vb;
+    mesh->ib = ib;
+    mesh->num_vertices = num_vertices;
+    mesh->num_faces = num_faces;
+    mesh->fvf = fvf;
+    mesh->options = options;
+
+    if (ppAdjacency) {
+        hr = D3DXCreateBuffer(num_faces * 3 * sizeof(DWORD), ppAdjacency);
+        if (SUCCEEDED(hr)) {
+            DWORD *adj_data = (DWORD *)((*ppAdjacency)->pVtbl->GetBufferPointer(*ppAdjacency));
+            memset(adj_data, 0xFFFFFFFF, num_faces * 3 * sizeof(DWORD)); // No adjacency for simplicity
+        }
+    }
+
+    *ppMesh = mesh;
+    return D3D_OK;
+}
+
+HRESULT WINAPI D3DXCreateMatrixStack(DWORD Flags, LPD3DXMATRIXSTACK *ppStack) {
+    ID3DXMatrixStack *stack = calloc(1, sizeof(ID3DXMatrixStack) + sizeof(ID3DXMatrixStackVtbl));
+    if (!stack) return D3DERR_OUTOFVIDEOMEMORY;
+
+    static const ID3DXMatrixStackVtbl stack_vtbl = {
+        .QueryInterface = d3dx_matrix_stack_query_interface,
+        .AddRef = d3dx_matrix_stack_add_ref,
+        .Release = d3dx_matrix_stack_release,
+        .Pop = d3dx_matrix_stack_pop,
+        .Push = d3dx_matrix_stack_push,
+        .LoadIdentity = d3dx_matrix_stack_load_identity,
+        .LoadMatrix = d3dx_matrix_stack_load_matrix,
+        .MultMatrix = d3dx_matrix_stack_mult_matrix,
+        .MultMatrixLocal = d3dx_matrix_stack_mult_matrix_local,
+        .RotateAxis = d3dx_matrix_stack_rotate_axis,
+        .RotateAxisLocal = d3dx_matrix_stack_rotate_axis_local,
+        .RotateYawPitchRoll = d3dx_matrix_stack_rotate_yaw_pitch_roll,
+        .RotateYawPitchRollLocal = d3dx_matrix_stack_rotate_yaw_pitch_roll_local,
+        .Scale = d3dx_matrix_stack_scale,
+        .ScaleLocal = d3dx_matrix_stack_scale_local,
+        .Translate = d3dx_matrix_stack_translate,
+        .TranslateLocal = d3dx_matrix_stack_translate_local,
+        .GetTop = d3dx_matrix_stack_get_top
+    };
+    stack->pVtbl = &stack_vtbl;
+    stack->capacity = 16;
+    stack->stack = calloc(stack->capacity, sizeof(D3DXMATRIX));
+    if (!stack->stack) {
+        free(stack);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+    stack->top = 0;
+
+    *ppStack = stack;
+    return D3D_OK;
+}
+
+HRESULT WINAPI D3DXGetErrorStringA(HRESULT hr, LPSTR pBuffer, UINT BufferLen) {
+    const char *msg = "Unknown error";
+    switch (hr) {
+        case D3D_OK: msg = "Success"; break;
+        case D3DERR_INVALIDCALL: msg = "Invalid call"; break;
+        case D3DERR_OUTOFVIDEOMEMORY: msg = "Out of video memory"; break;
+        case D3DERR_NOTAVAILABLE: msg = "Not available"; break;
+        case D3DXERR_INVALIDMESH: msg = "Invalid mesh"; break;
+        case D3DXERR_SKINNINGNOTSUPPORTED: msg = "Skinning not supported"; break;
+    }
+    strncpy(pBuffer, msg, BufferLen);
+    pBuffer[BufferLen - 1] = '\0';
+    return D3D_OK;
+}
+
+// Additional math functions
+D3DXMATRIX* WINAPI D3DXMatrixScaling(D3DXMATRIX *pOut, FLOAT sx, FLOAT sy, FLOAT sz) {
+    D3DXMatrixIdentity(pOut);
+    pOut->_11 = sx;
+    pOut->_22 = sy;
+    pOut->_33 = sz;
+    return pOut;
+}
+
+D3DXMATRIX* WINAPI D3DXMatrixTranslation(D3DXMATRIX *pOut, FLOAT x, FLOAT y, FLOAT z) {
+    D3DXMatrixIdentity(pOut);
+    pOut->_41 = x;
+    pOut->_42 = y;
+    pOut->_43 = z;
+    return pOut;
+}
+
+D3DXMATRIX* WINAPI D3DXMatrixRotationAxis(D3DXMATRIX *pOut, CONST D3DXVECTOR3 *pV, FLOAT Angle) {
+    D3DXVECTOR3 axis;
+    D3DXVec3Normalize(&axis, pV);
+    float c = cosf(Angle), s = sinf(Angle), t = 1.0f - c;
+    float x = axis.x, y = axis.y, z = axis.z;
+
+    D3DXMatrixIdentity(pOut);
+    pOut->_11 = t * x * x + c;
+    pOut->_12 = t * x * y - s * z;
+    pOut->_13 = t * x * z + s * y;
+    pOut->_21 = t * x * y + s * z;
+    pOut->_22 = t * y * y + c;
+    pOut->_23 = t * y * z - s * x;
+    pOut->_31 = t * x * z - s * y;
+    pOut->_32 = t * y * z + s * x;
+    pOut->_33 = t * z * z + c;
+    return pOut;
+}
+
+D3DXMATRIX* WINAPI D3DXMatrixRotationYawPitchRoll(D3DXMATRIX *pOut, FLOAT Yaw, FLOAT Pitch, FLOAT Roll) {
+    D3DXMATRIX rotX, rotY, rotZ, temp;
+    D3DXMatrixRotationX(&rotX, Pitch);
+    D3DXMatrixRotationY(&rotY, Yaw);
+    D3DXMatrixRotationZ(&rotZ, Roll);
+    D3DXMatrixMultiply(&temp, &rotX, &rotY);
+    D3DXMatrixMultiply(pOut, &temp, &rotZ);
+    return pOut;
+}
+
+// Stubbed D3DX functions
+HRESULT WINAPI D3DXCreatePolygon(LPDIRECT3DDEVICE8 pDevice, FLOAT Length, UINT Sides, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateCylinder(LPDIRECT3DDEVICE8 pDevice, FLOAT Radius1, FLOAT Radius2, FLOAT Length, UINT Slices, UINT Stacks, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateSphere(LPDIRECT3DDEVICE8 pDevice, FLOAT Radius, UINT Slices, UINT Stacks, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateTorus(LPDIRECT3DDEVICE8 pDevice, FLOAT InnerRadius, FLOAT OuterRadius, UINT Sides, UINT Rings, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateTeapot(LPDIRECT3DDEVICE8 pDevice, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateTextA(LPDIRECT3DDEVICE8 pDevice, HDC hDC, LPCSTR pText, FLOAT Deviation, FLOAT Extrusion, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency, LPGLYPHMETRICSFLOAT pGlyphMetrics) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateFont(LPDIRECT3DDEVICE8 pDevice, HFONT hFont, LPD3DXFONT *ppFont) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateSprite(LPDIRECT3DDEVICE8 pDevice, LPD3DXSPRITE *ppSprite) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateRenderToSurface(LPDIRECT3DDEVICE8 pDevice, UINT Width, UINT Height, D3DFORMAT Format, BOOL DepthStencil, D3DFORMAT DepthStencilFormat, LPD3DXRENDERTOSURFACE *ppRenderToSurface) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateRenderToEnvMap(LPDIRECT3DDEVICE8 pDevice, UINT Size, D3DFORMAT Format, BOOL DepthStencil, D3DFORMAT DepthStencilFormat, LPD3DXRenderToEnvMap *ppRenderToEnvMap) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXAssembleShader(LPCVOID pSrcData, UINT SrcDataLen, DWORD Flags, LPD3DXBUFFER *ppConstants, LPD3DXBUFFER *ppCompiledShader, LPD3DXBUFFER *ppCompilationErrors) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateEffect(LPDIRECT3DDEVICE8 pDevice, LPCVOID pSrcData, UINT SrcDataSize, LPD3DXEFFECT *ppEffect, LPD3DXBUFFER *ppCompilationErrors) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateMesh(DWORD NumFaces, DWORD NumVertices, DWORD Options, CONST DWORD *pDeclaration, LPDIRECT3DDEVICE8 pD3D, LPD3DXMESH *ppMesh) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateMeshFVF(DWORD NumFaces, DWORD NumVertices, DWORD Options, DWORD FVF, LPDIRECT3DDEVICE8 pD3D, LPD3DXMESH *ppMesh) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateSPMesh(LPD3DXMESH pMesh, CONST DWORD *pAdjacency, CONST LPD3DXATTRIBUTEWEIGHTS pVertexAttributeWeights, CONST FLOAT *pVertexWeights, LPD3DXSPMESH *ppSMesh) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCleanMesh(LPD3DXMESH pMeshIn, CONST DWORD *pAdjacencyIn, LPD3DXMESH *ppMeshOut, DWORD *pAdjacencyOut, LPD3DXBUFFER *ppErrorsAndWarnings) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXValidMesh(LPD3DXMESH pMeshIn, CONST DWORD *pAdjacency, LPD3DXBUFFER *ppErrorsAndWarnings) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXGeneratePMesh(LPD3DXMESH pMesh, CONST DWORD *pAdjacency, CONST LPD3DXATTRIBUTEWEIGHTS pVertexAttributeWeights, CONST FLOAT *pVertexWeights, DWORD MinValue, DWORD Options, LPD3DXPMESH *ppPMesh) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXSimplifyMesh(LPD3DXMESH pMesh, CONST DWORD *pAdjacency, CONST LPD3DXATTRIBUTEWEIGHTS pVertexAttributeWeights, CONST FLOAT *pVertexWeights, DWORD MinValue, DWORD Options, LPD3DXMESH *ppMesh) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXComputeBoundingSphere(PVOID pPointsFVF, DWORD NumVertices, DWORD FVF, D3DXVECTOR3 *pCenter, FLOAT *pRadius) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXComputeBoundingBox(PVOID pPointsFVF, DWORD NumVertices, DWORD FVF, D3DXVECTOR3 *pMin, D3DXVECTOR3 *pMax) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXComputeNormals(LPD3DXBASEMESH pMesh, CONST DWORD *pAdjacency) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXLoadMeshFromX(LPSTR pFilename, DWORD Options, LPDIRECT3DDEVICE8 pD3D, LPD3DXBUFFER *ppAdjacency, LPD3DXBUFFER *ppMaterials, DWORD *pNumMaterials, LPD3DXMESH *ppMesh) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateSkinMesh(DWORD NumFaces, DWORD NumVertices, DWORD NumBones, DWORD Options, CONST DWORD *pDeclaration, LPDIRECT3DDEVICE8 pD3D, LPD3DXSKINMESH *ppSkinMesh) { return D3DXERR_SKINNINGNOTSUPPORTED; }
+HRESULT WINAPI D3DXCreateSkinMeshFVF(DWORD NumFaces, DWORD NumVertices, DWORD NumBones, DWORD Options, DWORD FVF, LPDIRECT3DDEVICE8 pD3D, LPD3DXSKINMESH *ppSkinMesh) { return D3DXERR_SKINNINGNOTSUPPORTED; }
+
+// Direct3DCreate8
+IDirect3D8 *D3DAPI Direct3DCreate8(UINT SDKVersion) {
+    if (SDKVersion != D3D_SDK_VERSION) {
+        d3d8_gles_log("Invalid SDK version: %u\n", SDKVersion);
+        return NULL;
+    }
+
+    IDirect3D8 *d3d = calloc(1, sizeof(IDirect3D8) + sizeof(IDirect3D8Vtbl));
+    if (!d3d) return NULL;
+
+    static const IDirect3D8Vtbl d3d_vtbl = {
+        .QueryInterface = d3d8_query_interface,
+        .AddRef = d3d8_add_ref,
+        .Release = d3d8_release,
+        .RegisterSoftwareDevice = d3d8_register_software_device,
+        .GetAdapterCount = d3d8_get_adapter_count,
+        .GetAdapterIdentifier = d3d8_get_adapter_identifier,
+        .GetAdapterModeCount = d3d8_get_adapter_mode_count,
+        .EnumAdapterModes = d3d8_enum_adapter_modes,
+        .GetAdapterDisplayMode = d3d8_get_adapter_display_mode,
+        .CheckDeviceType = d3d8_check_device_type,
+        .CheckDeviceFormat = d3d8_check_device_format,
+        .CheckDeviceMultiSampleType = d3d8_check_device_multi_sample_type,
+        .CheckDepthStencilMatch = d3d8_check_depth_stencil_match,
+        .GetDeviceCaps = d3d8_get_device_caps,
+        .GetAdapterMonitor = d3d8_get_adapter_monitor,
+        .CreateDevice = d3d8_create_device
+    };
+    d3d->lpVtbl = &d3d_vtbl;
+
+    return d3d;
+}
