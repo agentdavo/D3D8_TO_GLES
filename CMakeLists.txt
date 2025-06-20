@@ -32,7 +32,7 @@ if(HEADER_ONLY)
 else()
     add_library(d3d8_to_gles STATIC ${SOURCES})
     target_include_directories(d3d8_to_gles PUBLIC ${CMAKE_SOURCE_DIR}/include)
-    target_link_libraries(d3d8_to_gles PUBLIC ${GLESv1_CM_LIBRARY} ${EGL_LIBRARY})
+    target_link_libraries(d3d8_to_gles PUBLIC ${GLESv1_CM_LIBRARY} ${EGL_LIBRARY} m)
 endif()
 
 # Enable error logging
@@ -44,3 +44,7 @@ endif()
 # Install targets
 install(TARGETS d3d8_to_gles DESTINATION lib)
 install(FILES include/d3d8_to_gles.h DESTINATION include)
+
+# Enable testing and build sample test executable
+enable_testing()
+add_subdirectory(tests)

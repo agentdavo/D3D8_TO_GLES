@@ -117,7 +117,10 @@ typedef ID3DXSkinMesh *LPD3DXSKINMESH;
 typedef ID3DXFont *LPD3DXFONT;
 typedef ID3DXSprite *LPD3DXSPRITE;
 typedef ID3DXRenderToSurface *LPD3DXRenderToSurface;
+// Alias using full upper-case style from the official SDK
+typedef ID3DXRenderToSurface *LPD3DXRENDERTOSURFACE;
 typedef ID3DXRenderToEnvMap *LPD3DXRenderToEnvMap;
+typedef ID3DXRenderToEnvMap *LPD3DXRENDERTOENVMAP;
 typedef ID3DXEffect *LPD3DXEFFECT;
 typedef IDirect3DSurface8 *LPDIRECT3DSURFACE8;
 typedef IDirect3DSwapChain8 *LPDIRECT3DSWAPCHAIN8;
