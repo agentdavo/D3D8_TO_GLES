@@ -5,10 +5,14 @@
 #include "GLES/gl.h"
 #include "GLES/glext.h"
 #include "EGL/egl.h"
-#include <stdint.h>
-#include <d3d8types.h>
-#include <d3d8caps.h>
-#include <d3dx8math.h>
+
+#include <limits.h>
+#include <float.h>
+
+#include "windows.h"
+#define COM_NO_WINDOWS_H
+#include "objbase.h"
+#include "d3d8_defs.h"
 
 #define D3DAPI // Placeholder for WINAPI
 #define D3D_SDK_VERSION 220
@@ -57,7 +61,6 @@
 #endif
 
 // Minimal mesh definitions
-#define D3DXMESH_MANAGED 0x220
 #define MAX_FVF_DECL_SIZE 20
 
 typedef struct _D3DXATTRIBUTERANGE {
@@ -70,6 +73,15 @@ typedef struct _D3DXATTRIBUTERANGE {
 
 typedef D3DXATTRIBUTERANGE *LPD3DXATTRIBUTERANGE;
 
+typedef struct _D3DXATTRIBUTEWEIGHTS {
+    FLOAT Position;
+    FLOAT Boundary;
+    FLOAT Normal;
+    FLOAT Diffuse;
+    FLOAT Specular;
+    FLOAT Tex[8];
+} D3DXATTRIBUTEWEIGHTS, *LPD3DXATTRIBUTEWEIGHTS;
+
 // Forward declarations
 typedef struct IDirect3D8 IDirect3D8;
 typedef struct IDirect3DDevice8 IDirect3DDevice8;
@@ -78,6 +90,37 @@ typedef struct IDirect3DIndexBuffer8 IDirect3DIndexBuffer8;
 typedef struct ID3DXBuffer ID3DXBuffer;
 typedef struct ID3DXMesh ID3DXMesh;
 typedef struct ID3DXMatrixStack ID3DXMatrixStack;
+typedef struct ID3DXBaseMesh ID3DXBaseMesh;
+typedef struct ID3DXPMesh ID3DXPMesh;
+typedef struct ID3DXSPMesh ID3DXSPMesh;
+typedef struct ID3DXSkinMesh ID3DXSkinMesh;
+typedef struct ID3DXFont ID3DXFont;
+typedef struct ID3DXSprite ID3DXSprite;
+typedef struct ID3DXRenderToSurface ID3DXRenderToSurface;
+typedef struct ID3DXRenderToEnvMap ID3DXRenderToEnvMap;
+typedef struct ID3DXEffect ID3DXEffect;
+typedef struct IDirect3DSurface8 IDirect3DSurface8;
+typedef struct IDirect3DSwapChain8 IDirect3DSwapChain8;
+
+typedef IDirect3D8 *LPDIRECT3D8;
+typedef IDirect3DDevice8 *LPDIRECT3DDEVICE8;
+typedef IDirect3DVertexBuffer8 *LPDIRECT3DVERTEXBUFFER8;
+typedef IDirect3DIndexBuffer8 *LPDIRECT3DINDEXBUFFER8;
+
+typedef ID3DXBuffer *LPD3DXBUFFER;
+typedef ID3DXMesh *LPD3DXMESH;
+typedef ID3DXMatrixStack *LPD3DXMATRIXSTACK;
+typedef ID3DXBaseMesh *LPD3DXBASEMESH;
+typedef ID3DXPMesh *LPD3DXPMESH;
+typedef ID3DXSPMesh *LPD3DXSPMESH;
+typedef ID3DXSkinMesh *LPD3DXSKINMESH;
+typedef ID3DXFont *LPD3DXFONT;
+typedef ID3DXSprite *LPD3DXSPRITE;
+typedef ID3DXRenderToSurface *LPD3DXRenderToSurface;
+typedef ID3DXRenderToEnvMap *LPD3DXRenderToEnvMap;
+typedef ID3DXEffect *LPD3DXEFFECT;
+typedef IDirect3DSurface8 *LPDIRECT3DSURFACE8;
+typedef IDirect3DSwapChain8 *LPDIRECT3DSWAPCHAIN8;
 
 // Internal state structure
 typedef struct {
@@ -326,6 +369,19 @@ D3DXMATRIX* WINAPI D3DXMatrixLookAtLH(D3DXMATRIX *pOut, CONST D3DXVECTOR3 *pEye,
 D3DXMATRIX* WINAPI D3DXMatrixPerspectiveFovLH(D3DXMATRIX *pOut, FLOAT fovy, FLOAT Aspect, FLOAT zn, FLOAT zf);
 D3DXVECTOR3* WINAPI D3DXVec3Normalize(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV);
 D3DXVECTOR3* WINAPI D3DXVec3TransformCoord(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV, CONST D3DXMATRIX *pM);
+D3DXVECTOR3* WINAPI D3DXVec3Subtract(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV1, CONST D3DXVECTOR3 *pV2);
+D3DXVECTOR3* WINAPI D3DXVec3Cross(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV1, CONST D3DXVECTOR3 *pV2);
+FLOAT WINAPI D3DXVec3Dot(CONST D3DXVECTOR3 *pV1, CONST D3DXVECTOR3 *pV2);
+D3DXMATRIX* WINAPI D3DXMatrixScaling(D3DXMATRIX *pOut, FLOAT sx, FLOAT sy, FLOAT sz);
+D3DXMATRIX* WINAPI D3DXMatrixTranslation(D3DXMATRIX *pOut, FLOAT x, FLOAT y, FLOAT z);
+D3DXMATRIX* WINAPI D3DXMatrixRotationX(D3DXMATRIX *pOut, FLOAT Angle);
+D3DXMATRIX* WINAPI D3DXMatrixRotationY(D3DXMATRIX *pOut, FLOAT Angle);
+D3DXMATRIX* WINAPI D3DXMatrixRotationZ(D3DXMATRIX *pOut, FLOAT Angle);
+D3DXMATRIX* WINAPI D3DXMatrixRotationAxis(D3DXMATRIX *pOut, CONST D3DXVECTOR3 *pV, FLOAT Angle);
+D3DXMATRIX* WINAPI D3DXMatrixRotationYawPitchRoll(D3DXMATRIX *pOut, FLOAT Yaw, FLOAT Pitch, FLOAT Roll);
+D3DXVECTOR3* WINAPI D3DXVec3Subtract(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV1, CONST D3DXVECTOR3 *pV2);
+D3DXVECTOR3* WINAPI D3DXVec3Cross(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV1, CONST D3DXVECTOR3 *pV2);
+FLOAT WINAPI D3DXVec3Dot(CONST D3DXVECTOR3 *pV1, CONST D3DXVECTOR3 *pV2);
 
 // Entry point
 IDirect3D8 *D3DAPI Direct3DCreate8(UINT SDKVersion);

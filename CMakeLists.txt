@@ -22,7 +22,6 @@ endif()
 
 # Include directories
 include_directories(${CMAKE_SOURCE_DIR}/include)
-include_directories(${CMAKE_SOURCE_DIR}/lib/min-dx8-sdk)
 
 # Source files
 set(SOURCES src/d3d8_to_gles.c)
