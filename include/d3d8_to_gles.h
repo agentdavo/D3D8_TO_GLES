@@ -87,6 +87,7 @@ typedef struct IDirect3D8 IDirect3D8;
 typedef struct IDirect3DDevice8 IDirect3DDevice8;
 typedef struct IDirect3DVertexBuffer8 IDirect3DVertexBuffer8;
 typedef struct IDirect3DIndexBuffer8 IDirect3DIndexBuffer8;
+typedef struct IDirect3DTexture8 IDirect3DTexture8;
 typedef struct ID3DXBuffer ID3DXBuffer;
 typedef struct ID3DXMesh ID3DXMesh;
 typedef struct ID3DXMatrixStack ID3DXMatrixStack;
@@ -106,6 +107,7 @@ typedef IDirect3D8 *LPDIRECT3D8;
 typedef IDirect3DDevice8 *LPDIRECT3DDEVICE8;
 typedef IDirect3DVertexBuffer8 *LPDIRECT3DVERTEXBUFFER8;
 typedef IDirect3DIndexBuffer8 *LPDIRECT3DINDEXBUFFER8;
+typedef IDirect3DTexture8 *LPDIRECT3DTEXTURE8;
 
 typedef ID3DXBuffer *LPD3DXBUFFER;
 typedef ID3DXMesh *LPD3DXMESH;
@@ -155,6 +157,15 @@ typedef struct {
     D3DPOOL pool;
     BYTE *temp_buffer;
 } GLES_Buffer;
+
+typedef struct {
+    GLuint tex_id;
+    UINT width;
+    UINT height;
+    UINT levels;
+    D3DFORMAT format;
+    BYTE *temp_buffer;
+} GLES_Texture;
 
 // ID3DXBuffer interface
 typedef struct {
@@ -295,6 +306,8 @@ typedef struct {
     void (D3DAPI *GetGammaRamp)(IDirect3DDevice8 *This, D3DGAMMARAMP *pRamp);
     HRESULT (D3DAPI *CreateVertexBuffer)(IDirect3DDevice8 *This, UINT Length, DWORD Usage, DWORD FVF, D3DPOOL Pool, IDirect3DVertexBuffer8 **ppVertexBuffer);
     HRESULT (D3DAPI *CreateIndexBuffer)(IDirect3DDevice8 *This, UINT Length, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DIndexBuffer8 **ppIndexBuffer);
+    HRESULT (D3DAPI *CreateTexture)(IDirect3DDevice8 *This, UINT Width, UINT Height, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DTexture8 **ppTexture);
+    HRESULT (D3DAPI *SetTexture)(IDirect3DDevice8 *This, DWORD Stage, IDirect3DTexture8 *pTexture);
     HRESULT (D3DAPI *SetRenderState)(IDirect3DDevice8 *This, D3DRENDERSTATETYPE State, DWORD Value);
     HRESULT (D3DAPI *BeginScene)(IDirect3DDevice8 *This);
     HRESULT (D3DAPI *EndScene)(IDirect3DDevice8 *This);
@@ -356,6 +369,22 @@ typedef struct {
 struct IDirect3DIndexBuffer8 {
     const IDirect3DIndexBuffer8Vtbl *lpVtbl;
     GLES_Buffer *buffer;
+    IDirect3DDevice8 *device;
+};
+
+// IDirect3DTexture8 interface
+typedef struct {
+    HRESULT (D3DAPI *QueryInterface)(IDirect3DTexture8 *This, REFIID riid, void **ppvObj);
+    ULONG (D3DAPI *AddRef)(IDirect3DTexture8 *This);
+    ULONG (D3DAPI *Release)(IDirect3DTexture8 *This);
+    HRESULT (D3DAPI *LockRect)(IDirect3DTexture8 *This, UINT Level, D3DLOCKED_RECT *pLockedRect, CONST RECT *pRect, DWORD Flags);
+    HRESULT (D3DAPI *UnlockRect)(IDirect3DTexture8 *This, UINT Level);
+    HRESULT (D3DAPI *GetLevelDesc)(IDirect3DTexture8 *This, UINT Level, D3DSURFACE_DESC *pDesc);
+} IDirect3DTexture8Vtbl;
+
+struct IDirect3DTexture8 {
+    const IDirect3DTexture8Vtbl *lpVtbl;
+    GLES_Texture *texture;
     IDirect3DDevice8 *device;
 };
 
