@@ -2,14 +2,13 @@
 #ifndef D3D8_TO_GLES_H
 #define D3D8_TO_GLES_H
 
-#include <GLES/gl.h>
-#include <GLES/glext.h>
-#include <EGL/egl.h>
+#include "GLES/gl.h"
+#include "GLES/glext.h"
+#include "EGL/egl.h"
 #include <stdint.h>
 #include <d3d8types.h>
 #include <d3d8caps.h>
 #include <d3dx8math.h>
-#include <d3dx8mesh.h>
 
 #define D3DAPI // Placeholder for WINAPI
 #define D3D_SDK_VERSION 220
@@ -23,6 +22,20 @@
 #define D3DERR_OUTOFVIDEOMEMORY MAKE_D3DHRESULT(380)
 #define D3DERR_NOTAVAILABLE MAKE_D3DHRESULT(2154)
 #define D3DXERR_NOTAVAILABLE MAKE_DDHRESULT(2154)
+
+// Minimal mesh definitions
+#define D3DXMESH_MANAGED 0x220
+#define MAX_FVF_DECL_SIZE 20
+
+typedef struct _D3DXATTRIBUTERANGE {
+    DWORD AttribId;
+    DWORD FaceStart;
+    DWORD FaceCount;
+    DWORD VertexStart;
+    DWORD VertexCount;
+} D3DXATTRIBUTERANGE;
+
+typedef D3DXATTRIBUTERANGE *LPD3DXATTRIBUTERANGE;
 
 // Forward declarations
 typedef struct IDirect3D8 IDirect3D8;
