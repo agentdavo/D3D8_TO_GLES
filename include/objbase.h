@@ -68,6 +68,9 @@ interface IUnknown {
     const struct IUnknownVtbl *lpVtbl;
 };
 
+// Minimal IStream forward declaration for d3dx8 headers
+typedef interface IStream IStream;
+
 #ifdef __cplusplus
 }
 #endif
