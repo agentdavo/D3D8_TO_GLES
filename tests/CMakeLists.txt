@@ -1,0 +1,3 @@
+add_executable(capability_test capability_test.c)
+target_link_libraries(capability_test PRIVATE d3d8_to_gles)
+add_test(NAME capability_test COMMAND capability_test)

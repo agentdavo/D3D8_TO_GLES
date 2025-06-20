@@ -44,6 +44,54 @@ static HRESULT D3DAPI d3d8_set_viewport(IDirect3DDevice8 *This, CONST D3DVIEWPOR
 static HRESULT D3DAPI d3d8_set_transform(IDirect3DDevice8 *This, D3DTRANSFORMSTATETYPE State, CONST D3DXMATRIX *pMatrix);
 static HRESULT D3DAPI d3d8_draw_indexed_primitive(IDirect3DDevice8 *This, D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount);
 
+// Forward declarations for vertex buffer methods
+static HRESULT D3DAPI d3d8_vb_get_device(IDirect3DVertexBuffer8 *This, IDirect3DDevice8 **ppDevice);
+static HRESULT D3DAPI d3d8_vb_set_private_data(IDirect3DVertexBuffer8 *This, REFGUID refguid, CONST void *pData, DWORD SizeOfData, DWORD Flags);
+static HRESULT D3DAPI d3d8_vb_get_private_data(IDirect3DVertexBuffer8 *This, REFGUID refguid, void *pData, DWORD *pSizeOfData);
+static HRESULT D3DAPI d3d8_vb_free_private_data(IDirect3DVertexBuffer8 *This, REFGUID refguid);
+static DWORD D3DAPI d3d8_vb_set_priority(IDirect3DVertexBuffer8 *This, DWORD PriorityNew);
+static DWORD D3DAPI d3d8_vb_get_priority(IDirect3DVertexBuffer8 *This);
+static void D3DAPI d3d8_vb_pre_load(IDirect3DVertexBuffer8 *This);
+static D3DRESOURCETYPE D3DAPI d3d8_vb_get_type(IDirect3DVertexBuffer8 *This);
+static HRESULT D3DAPI d3d8_vb_lock(IDirect3DVertexBuffer8 *This, UINT OffsetToLock, UINT SizeToLock, BYTE **ppbData, DWORD Flags);
+static HRESULT D3DAPI d3d8_vb_unlock(IDirect3DVertexBuffer8 *This);
+static HRESULT D3DAPI d3d8_vb_get_desc(IDirect3DVertexBuffer8 *This, D3DVERTEXBUFFER_DESC *pDesc);
+
+// IUnknown-style wrappers for COM objects
+static HRESULT D3DAPI d3d8_device_query_interface(IDirect3DDevice8 *This, REFIID riid, void **ppv);
+static ULONG D3DAPI d3d8_device_add_ref(IDirect3DDevice8 *This);
+static ULONG D3DAPI d3d8_device_release(IDirect3DDevice8 *This);
+static HRESULT D3DAPI vb_query_interface(IDirect3DVertexBuffer8 *This, REFIID riid, void **ppv);
+static ULONG D3DAPI vb_add_ref(IDirect3DVertexBuffer8 *This);
+static ULONG D3DAPI vb_release(IDirect3DVertexBuffer8 *This);
+static HRESULT D3DAPI ib_query_interface(IDirect3DIndexBuffer8 *This, REFIID riid, void **ppv);
+static ULONG D3DAPI ib_add_ref(IDirect3DIndexBuffer8 *This);
+static ULONG D3DAPI ib_release(IDirect3DIndexBuffer8 *This);
+
+// Forward declarations for index buffer methods
+static HRESULT D3DAPI d3d8_ib_get_device(IDirect3DIndexBuffer8 *This, IDirect3DDevice8 **ppDevice);
+static HRESULT D3DAPI d3d8_ib_set_private_data(IDirect3DIndexBuffer8 *This, REFGUID refguid, CONST void *pData, DWORD SizeOfData, DWORD Flags);
+static HRESULT D3DAPI d3d8_ib_get_private_data(IDirect3DIndexBuffer8 *This, REFGUID refguid, void *pData, DWORD *pSizeOfData);
+static HRESULT D3DAPI d3d8_ib_free_private_data(IDirect3DIndexBuffer8 *This, REFGUID refguid);
+static DWORD D3DAPI d3d8_ib_set_priority(IDirect3DIndexBuffer8 *This, DWORD PriorityNew);
+static DWORD D3DAPI d3d8_ib_get_priority(IDirect3DIndexBuffer8 *This);
+static void D3DAPI d3d8_ib_pre_load(IDirect3DIndexBuffer8 *This);
+static D3DRESOURCETYPE D3DAPI d3d8_ib_get_type(IDirect3DIndexBuffer8 *This);
+static HRESULT D3DAPI d3d8_ib_lock(IDirect3DIndexBuffer8 *This, UINT OffsetToLock, UINT SizeToLock, BYTE **ppbData, DWORD Flags);
+static HRESULT D3DAPI d3d8_ib_unlock(IDirect3DIndexBuffer8 *This);
+static HRESULT D3DAPI d3d8_ib_get_desc(IDirect3DIndexBuffer8 *This, D3DINDEXBUFFER_DESC *pDesc);
+
+// Forward declarations for ID3DXBuffer helper methods
+static HRESULT D3DAPI d3dx_buffer_query_interface(ID3DXBuffer *This, REFIID iid, void **ppv);
+static ULONG D3DAPI d3dx_buffer_add_ref(ID3DXBuffer *This);
+static ULONG D3DAPI d3dx_buffer_release(ID3DXBuffer *This);
+static LPVOID d3dx_buffer_get_buffer_pointer(ID3DXBuffer *This);
+static DWORD d3dx_buffer_get_buffer_size(ID3DXBuffer *This);
+
+// Forward declarations for basic D3DX helpers
+UINT WINAPI D3DXGetFVFVertexSize(DWORD FVF);
+HRESULT WINAPI D3DXDeclaratorFromFVF(DWORD FVF, DWORD Declaration[MAX_FVF_DECL_SIZE]);
+
 // Helper: Map Direct3D render state to OpenGL ES
 static void set_render_state(GLES_Device *gles, D3DRENDERSTATETYPE state, DWORD value) {
     switch (state) {
@@ -161,6 +209,7 @@ static void fill_d3d_caps(D3DCAPS8 *pCaps, D3DDEVTYPE DeviceType) {
     pCaps->MaxVertexIndex = 65535;
     pCaps->MaxPointSize = 64.0f;
 }
+
 
 // Helper: Convert Direct3D matrix to OpenGL (left-handed to right-handed, z=[0,1] to [-1,1])
 static void d3d_to_gl_matrix(GLfloat *gl_matrix, const D3DXMATRIX *d3d_matrix) {
@@ -407,12 +456,13 @@ static D3DXMATRIX* d3dx_matrix_stack_get_top(ID3DXMatrixStack *This) {
 }
 
 // ID3DXMesh methods
-static HRESULT D3DAPI d3dx_mesh_query_interface(ID3DXMesh *This, REFIID iid, void **ppv) {
+static HRESULT D3DAPI d3dx_mesh_query_interface(void *This, REFIID iid, void **ppv) {
     return D3DERR_INVALIDCALL;
 }
 
-static ULONG D3DAPI d3dx_mesh_add_ref(ID3DXMesh *This) { return 1; }
-static ULONG D3DAPI d3dx_mesh_release(ID3DXMesh *This) {
+static ULONG D3DAPI d3dx_mesh_add_ref(void *This) { return 1; }
+static ULONG D3DAPI d3dx_mesh_release(void *ptr) {
+    ID3DXMesh *This = ptr;
     if (This->vb) This->vb->lpVtbl->Release(This->vb);
     if (This->ib) This->ib->lpVtbl->Release(This->ib);
     if (This->device) This->device->lpVtbl->Release(This->device);
@@ -422,7 +472,8 @@ static ULONG D3DAPI d3dx_mesh_release(ID3DXMesh *This) {
     return 0;
 }
 
-static HRESULT D3DAPI d3dx_mesh_draw_subset(ID3DXMesh *This, DWORD AttribId) {
+static HRESULT D3DAPI d3dx_mesh_draw_subset(void *ptr, DWORD AttribId) {
+    ID3DXMesh *This = ptr;
     if (AttribId >= This->attrib_table_size || !This->device) return D3DERR_INVALIDCALL;
 
     D3DXATTRIBUTERANGE *range = &This->attrib_table[AttribId];
@@ -434,66 +485,81 @@ static HRESULT D3DAPI d3dx_mesh_draw_subset(ID3DXMesh *This, DWORD AttribId) {
                                                      range->VertexCount, range->FaceStart * 3, range->FaceCount);
 }
 
-static DWORD D3DAPI d3dx_mesh_get_num_faces(ID3DXMesh *This) {
+static DWORD D3DAPI d3dx_mesh_get_num_faces(void *ptr) {
+    ID3DXMesh *This = ptr;
     return This->num_faces;
 }
 
-static DWORD D3DAPI d3dx_mesh_get_num_vertices(ID3DXMesh *This) {
+static DWORD D3DAPI d3dx_mesh_get_num_vertices(void *ptr) {
+    ID3DXMesh *This = ptr;
     return This->num_vertices;
 }
 
-static DWORD D3DAPI d3dx_mesh_get_fvf(ID3DXMesh *This) {
+static DWORD D3DAPI d3dx_mesh_get_fvf(void *ptr) {
+    ID3DXMesh *This = ptr;
     return This->fvf;
 }
 
-static HRESULT D3DAPI d3dx_mesh_get_declaration(ID3DXMesh *This, DWORD Declaration[MAX_FVF_DECL_SIZE]) {
+static HRESULT D3DAPI d3dx_mesh_get_declaration(void *ptr, DWORD Declaration[MAX_FVF_DECL_SIZE]) {
+    ID3DXMesh *This = ptr;
     return D3DXDeclaratorFromFVF(This->fvf, Declaration);
 }
 
-static DWORD D3DAPI d3dx_mesh_get_options(ID3DXMesh *This) {
+static DWORD D3DAPI d3dx_mesh_get_options(void *ptr) {
+    ID3DXMesh *This = ptr;
     return This->options;
 }
 
-static HRESULT D3DAPI d3dx_mesh_get_device(ID3DXMesh *This, LPDIRECT3DDEVICE8 *ppDevice) {
+static HRESULT D3DAPI d3dx_mesh_get_device(void *ptr, LPDIRECT3DDEVICE8 *ppDevice) {
+    ID3DXMesh *This = ptr;
     *ppDevice = This->device;
     return D3D_OK;
 }
 
-static HRESULT D3DAPI d3dx_mesh_clone_mesh_fvf(ID3DXMesh *This, DWORD Options, DWORD FVF, LPDIRECT3DDEVICE8 pD3DDevice, LPD3DXMESH *ppCloneMesh) {
+static HRESULT D3DAPI d3dx_mesh_clone_mesh_fvf(void *ptr, DWORD Options, DWORD FVF, LPDIRECT3DDEVICE8 pD3DDevice, LPD3DXMESH *ppCloneMesh) {
+    ID3DXMesh *This = ptr;
     return D3DXERR_NOTAVAILABLE;
 }
 
-static HRESULT D3DAPI d3dx_mesh_clone_mesh(ID3DXMesh *This, DWORD Options, CONST DWORD *pDeclaration, LPDIRECT3DDEVICE8 pD3DDevice, LPD3DXMESH *ppCloneMesh) {
+static HRESULT D3DAPI d3dx_mesh_clone_mesh(void *ptr, DWORD Options, CONST DWORD *pDeclaration, LPDIRECT3DDEVICE8 pD3DDevice, LPD3DXMESH *ppCloneMesh) {
+    ID3DXMesh *This = ptr;
     return D3DXERR_NOTAVAILABLE;
 }
 
-static HRESULT D3DAPI d3dx_mesh_get_vertex_buffer(ID3DXMesh *This, LPDIRECT3DVERTEXBUFFER8 *ppVB) {
+static HRESULT D3DAPI d3dx_mesh_get_vertex_buffer(void *ptr, LPDIRECT3DVERTEXBUFFER8 *ppVB) {
+    ID3DXMesh *This = ptr;
     *ppVB = This->vb;
     return D3D_OK;
 }
 
-static HRESULT D3DAPI d3dx_mesh_get_index_buffer(ID3DXMesh *This, LPDIRECT3DINDEXBUFFER8 *ppIB) {
+static HRESULT D3DAPI d3dx_mesh_get_index_buffer(void *ptr, LPDIRECT3DINDEXBUFFER8 *ppIB) {
+    ID3DXMesh *This = ptr;
     *ppIB = This->ib;
     return D3D_OK;
 }
 
-static HRESULT D3DAPI d3dx_mesh_lock_vertex_buffer(ID3DXMesh *This, DWORD Flags, BYTE **ppData) {
+static HRESULT D3DAPI d3dx_mesh_lock_vertex_buffer(void *ptr, DWORD Flags, BYTE **ppData) {
+    ID3DXMesh *This = ptr;
     return This->vb->lpVtbl->Lock(This->vb, 0, 0, ppData, Flags);
 }
 
-static HRESULT D3DAPI d3dx_mesh_unlock_vertex_buffer(ID3DXMesh *This) {
+static HRESULT D3DAPI d3dx_mesh_unlock_vertex_buffer(void *ptr) {
+    ID3DXMesh *This = ptr;
     return This->vb->lpVtbl->Unlock(This->vb);
 }
 
-static HRESULT D3DAPI d3dx_mesh_lock_index_buffer(ID3DXMesh *This, DWORD Flags, BYTE **ppData) {
+static HRESULT D3DAPI d3dx_mesh_lock_index_buffer(void *ptr, DWORD Flags, BYTE **ppData) {
+    ID3DXMesh *This = ptr;
     return This->ib->lpVtbl->Lock(This->ib, 0, 0, ppData, Flags);
 }
 
-static HRESULT D3DAPI d3dx_mesh_unlock_index_buffer(ID3DXMesh *This) {
+static HRESULT D3DAPI d3dx_mesh_unlock_index_buffer(void *ptr) {
+    ID3DXMesh *This = ptr;
     return This->ib->lpVtbl->Unlock(This->ib);
 }
 
-static HRESULT D3DAPI d3dx_mesh_get_attribute_table(ID3DXMesh *This, D3DXATTRIBUTERANGE *pAttribTable, DWORD *pAttribTableSize) {
+static HRESULT D3DAPI d3dx_mesh_get_attribute_table(void *ptr, D3DXATTRIBUTERANGE *pAttribTable, DWORD *pAttribTableSize) {
+    ID3DXMesh *This = ptr;
     if (pAttribTableSize) *pAttribTableSize = This->attrib_table_size;
     if (pAttribTable && This->attrib_table) {
         memcpy(pAttribTable, This->attrib_table, This->attrib_table_size * sizeof(D3DXATTRIBUTERANGE));
@@ -501,33 +567,40 @@ static HRESULT D3DAPI d3dx_mesh_get_attribute_table(ID3DXMesh *This, D3DXATTRIBU
     return D3D_OK;
 }
 
-static HRESULT D3DAPI d3dx_mesh_convert_point_reps_to_adjacency(ID3DXMesh *This, CONST DWORD *pPRep, DWORD *pAdjacency) {
+static HRESULT D3DAPI d3dx_mesh_convert_point_reps_to_adjacency(void *ptr, CONST DWORD *pPRep, DWORD *pAdjacency) {
+    ID3DXMesh *This = ptr;
     return D3DXERR_NOTAVAILABLE;
 }
 
-static HRESULT D3DAPI d3dx_mesh_convert_adjacency_to_point_reps(ID3DXMesh *This, CONST DWORD *pAdjacency, DWORD *pPRep) {
+static HRESULT D3DAPI d3dx_mesh_convert_adjacency_to_point_reps(void *ptr, CONST DWORD *pAdjacency, DWORD *pPRep) {
+    ID3DXMesh *This = ptr;
     return D3DXERR_NOTAVAILABLE;
 }
 
-static HRESULT D3DAPI d3dx_mesh_generate_adjacency(ID3DXMesh *This, FLOAT Epsilon, DWORD *pAdjacency) {
+static HRESULT D3DAPI d3dx_mesh_generate_adjacency(void *ptr, FLOAT Epsilon, DWORD *pAdjacency) {
+    ID3DXMesh *This = ptr;
     return D3DXERR_NOTAVAILABLE;
 }
 
-static HRESULT D3DAPI d3dx_mesh_lock_attribute_buffer(ID3DXMesh *This, DWORD Flags, DWORD **ppData) {
+static HRESULT D3DAPI d3dx_mesh_lock_attribute_buffer(void *ptr, DWORD Flags, DWORD **ppData) {
+    ID3DXMesh *This = ptr;
     if (!This->attrib_buffer) return D3DERR_INVALIDCALL;
     *ppData = This->attrib_buffer;
     return D3D_OK;
 }
 
-static HRESULT D3DAPI d3dx_mesh_unlock_attribute_buffer(ID3DXMesh *This) {
+static HRESULT D3DAPI d3dx_mesh_unlock_attribute_buffer(void *ptr) {
+    ID3DXMesh *This = ptr;
     return D3D_OK;
 }
 
-static HRESULT D3DAPI d3dx_mesh_optimize(ID3DXMesh *This, DWORD Flags, CONST DWORD *pAdjacencyIn, DWORD *pAdjacencyOut, DWORD *pFaceRemap, LPD3DXBUFFER *ppVertexRemap, LPD3DXMESH *ppOptMesh) {
+static HRESULT D3DAPI d3dx_mesh_optimize(void *ptr, DWORD Flags, CONST DWORD *pAdjacencyIn, DWORD *pAdjacencyOut, DWORD *pFaceRemap, LPD3DXBUFFER *ppVertexRemap, LPD3DXMESH *ppOptMesh) {
+    ID3DXMesh *This = ptr;
     return D3DXERR_NOTAVAILABLE;
 }
 
-static HRESULT D3DAPI d3dx_mesh_optimize_inplace(ID3DXMesh *This, DWORD Flags, CONST DWORD *pAdjacencyIn, DWORD *pAdjacencyOut, DWORD *pFaceRemap, LPD3DXBUFFER *ppVertexRemap) {
+static HRESULT D3DAPI d3dx_mesh_optimize_inplace(void *ptr, DWORD Flags, CONST DWORD *pAdjacencyIn, DWORD *pAdjacencyOut, DWORD *pFaceRemap, LPD3DXBUFFER *ppVertexRemap) {
+    ID3DXMesh *This = ptr;
     return D3DXERR_NOTAVAILABLE;
 }
 
@@ -539,6 +612,56 @@ static HRESULT D3DAPI common_query_interface(void *This, REFIID riid, void **ppv
 
 static ULONG D3DAPI common_add_ref(void *This) { (void)This; return 1; }
 static ULONG D3DAPI common_release(void *This) { free(This); return 0; }
+
+// IUnknown-style helper implementations
+static HRESULT D3DAPI d3d8_device_query_interface(IDirect3DDevice8 *This, REFIID riid, void **ppv) {
+    return common_query_interface(This, riid, ppv);
+}
+static ULONG D3DAPI d3d8_device_add_ref(IDirect3DDevice8 *This) { return common_add_ref(This); }
+static ULONG D3DAPI d3d8_device_release(IDirect3DDevice8 *This) { return common_release(This); }
+static HRESULT D3DAPI vb_query_interface(IDirect3DVertexBuffer8 *This, REFIID riid, void **ppv) {
+    return common_query_interface(This, riid, ppv);
+}
+static ULONG D3DAPI vb_add_ref(IDirect3DVertexBuffer8 *This) { return common_add_ref(This); }
+static ULONG D3DAPI vb_release(IDirect3DVertexBuffer8 *This) { return common_release(This); }
+static HRESULT D3DAPI ib_query_interface(IDirect3DIndexBuffer8 *This, REFIID riid, void **ppv) {
+    return common_query_interface(This, riid, ppv);
+}
+static ULONG D3DAPI ib_add_ref(IDirect3DIndexBuffer8 *This) { return common_add_ref(This); }
+static ULONG D3DAPI ib_release(IDirect3DIndexBuffer8 *This) { return common_release(This); }
+
+static const IDirect3DDevice8Vtbl device_vtbl = {
+    .QueryInterface = d3d8_device_query_interface,
+    .AddRef = d3d8_device_add_ref,
+    .Release = d3d8_device_release,
+    .TestCooperativeLevel = d3d8_test_cooperative_level,
+    .GetAvailableTextureMem = d3d8_get_available_texture_mem,
+    .ResourceManagerDiscardBytes = d3d8_resource_manager_discard_bytes,
+    .GetDirect3D = d3d8_get_direct3d,
+    .GetDeviceCaps = device_get_device_caps,
+    .GetDisplayMode = d3d8_get_display_mode,
+    .GetCreationParameters = d3d8_get_creation_parameters,
+    .SetCursorProperties = d3d8_set_cursor_properties,
+    .SetCursorPosition = d3d8_set_cursor_position,
+    .ShowCursor = d3d8_show_cursor,
+    .CreateAdditionalSwapChain = d3d8_create_additional_swap_chain,
+    .Reset = d3d8_reset,
+    .Present = d3d8_present,
+    .GetBackBuffer = d3d8_get_back_buffer,
+    .GetRasterStatus = d3d8_get_raster_status,
+    .SetGammaRamp = d3d8_set_gamma_ramp,
+    .GetGammaRamp = d3d8_get_gamma_ramp,
+    .CreateVertexBuffer = d3d8_create_vertex_buffer,
+    .CreateIndexBuffer = d3d8_create_index_buffer,
+    .SetRenderState = d3d8_set_render_state,
+    .BeginScene = d3d8_begin_scene,
+    .EndScene = d3d8_end_scene,
+    .SetStreamSource = d3d8_set_stream_source,
+    .SetIndices = d3d8_set_indices,
+    .SetViewport = d3d8_set_viewport,
+    .SetTransform = d3d8_set_transform,
+    .DrawIndexedPrimitive = d3d8_draw_indexed_primitive
+};
 static HRESULT D3DAPI d3d8_register_software_device(IDirect3D8 *This, void *pInitializeFunction) { return D3DERR_NOTAVAILABLE; }
 static UINT D3DAPI d3d8_get_adapter_count(IDirect3D8 *This) { return 1; }
 static HRESULT D3DAPI d3d8_get_adapter_identifier(IDirect3D8 *This, UINT Adapter, DWORD Flags, D3DADAPTER_IDENTIFIER8 *pIdentifier) { return D3DERR_NOTAVAILABLE; }
@@ -579,7 +702,8 @@ static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVT
         return D3DERR_INVALIDCALL;
     }
 
-    gles->surface = eglCreateWindowSurface(gles->display, config, hFocusWindow, NULL);
+    gles->surface = eglCreateWindowSurface(gles->display, config,
+                                           (EGLNativeWindowType)(uintptr_t)hFocusWindow, NULL);
     gles->context = eglCreateContext(gles->display, config, EGL_NO_CONTEXT, NULL);
     if (!gles->surface || !gles->context || !eglMakeCurrent(gles->display, gles->surface, gles->surface, gles->context)) {
         if (gles->context) eglDestroyContext(gles->display, gles->context);
@@ -609,38 +733,6 @@ static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVT
         return D3DERR_OUTOFVIDEOMEMORY;
     }
 
-    static const IDirect3DDevice8Vtbl device_vtbl = {
-        .QueryInterface = common_query_interface,
-        .AddRef = common_add_ref,
-        .Release = common_release,
-        .TestCooperativeLevel = d3d8_test_cooperative_level,
-        .GetAvailableTextureMem = d3d8_get_available_texture_mem,
-        .ResourceManagerDiscardBytes = d3d8_resource_manager_discard_bytes,
-        .GetDirect3D = d3d8_get_direct3d,
-        .GetDeviceCaps = device_get_device_caps,
-        .GetDisplayMode = d3d8_get_display_mode,
-        .GetCreationParameters = d3d8_get_creation_parameters,
-        .SetCursorProperties = d3d8_set_cursor_properties,
-        .SetCursorPosition = d3d8_set_cursor_position,
-        .ShowCursor = d3d8_show_cursor,
-        .CreateAdditionalSwapChain = d3d8_create_additional_swap_chain,
-        .Reset = d3d8_reset,
-        .Present = d3d8_present,
-        .GetBackBuffer = d3d8_get_back_buffer,
-        .GetRasterStatus = d3d8_get_raster_status,
-        .SetGammaRamp = d3d8_set_gamma_ramp,
-        .GetGammaRamp = d3d8_get_gamma_ramp,
-        .CreateVertexBuffer = d3d8_create_vertex_buffer,
-        .CreateIndexBuffer = d3d8_create_index_buffer,
-        .SetRenderState = d3d8_set_render_state,
-        .BeginScene = d3d8_begin_scene,
-        .EndScene = d3d8_end_scene,
-        .SetStreamSource = d3d8_set_stream_source,
-        .SetIndices = d3d8_set_indices,
-        .SetViewport = d3d8_set_viewport,
-        .SetTransform = d3d8_set_transform,
-        .DrawIndexedPrimitive = d3d8_draw_indexed_primitive
-    };
     device->lpVtbl = &device_vtbl;
     device->gles = gles;
     device->d3d8 = This;
@@ -687,7 +779,11 @@ static HRESULT D3DAPI d3d8_end_scene(IDirect3DDevice8 *This) {
 static HRESULT D3DAPI d3d8_set_viewport(IDirect3DDevice8 *This, CONST D3DVIEWPORT8 *pViewport) {
     This->gles->viewport = *pViewport;
     glViewport(pViewport->X, pViewport->Y, pViewport->Width, pViewport->Height);
+#ifdef GL_VERSION_ES_CM_1_0
+    glDepthRangef(pViewport->MinZ, pViewport->MaxZ);
+#else
     glDepthRange(pViewport->MinZ, pViewport->MaxZ);
+#endif
     return D3D_OK;
 }
 
@@ -764,9 +860,9 @@ static HRESULT D3DAPI d3d8_create_vertex_buffer(IDirect3DDevice8 *This, UINT Len
     }
 
     static const IDirect3DVertexBuffer8Vtbl vb_vtbl = {
-        .QueryInterface = common_query_interface,
-        .AddRef = common_add_ref,
-        .Release = common_release,
+        .QueryInterface = vb_query_interface,
+        .AddRef = vb_add_ref,
+        .Release = vb_release,
         .GetDevice = d3d8_vb_get_device,
         .SetPrivateData = d3d8_vb_set_private_data,
         .GetPrivateData = d3d8_vb_get_private_data,
@@ -815,9 +911,9 @@ static HRESULT D3DAPI d3d8_create_index_buffer(IDirect3DDevice8 *This, UINT Leng
     }
 
     static const IDirect3DIndexBuffer8Vtbl ib_vtbl = {
-        .QueryInterface = common_query_interface,
-        .AddRef = common_add_ref,
-        .Release = common_release,
+        .QueryInterface = ib_query_interface,
+        .AddRef = ib_add_ref,
+        .Release = ib_release,
         .GetDevice = d3d8_ib_get_device,
         .SetPrivateData = d3d8_ib_set_private_data,
         .GetPrivateData = d3d8_ib_get_private_data,
@@ -976,6 +1072,35 @@ HRESULT WINAPI D3DXCreateBuffer(DWORD NumBytes, LPD3DXBUFFER *ppBuffer) {
 
     *ppBuffer = buffer;
     return D3D_OK;
+}
+
+// ID3DXBuffer helpers
+static HRESULT D3DAPI d3dx_buffer_query_interface(ID3DXBuffer *This, REFIID iid, void **ppv) {
+    (void)This;
+    (void)iid;
+    (void)ppv;
+    return D3DERR_NOTAVAILABLE;
+}
+
+static ULONG D3DAPI d3dx_buffer_add_ref(ID3DXBuffer *This) {
+    (void)This;
+    return 1;
+}
+
+static ULONG D3DAPI d3dx_buffer_release(ID3DXBuffer *This) {
+    if (This) {
+        free(This->data);
+        free(This);
+    }
+    return 0;
+}
+
+static LPVOID d3dx_buffer_get_buffer_pointer(ID3DXBuffer *This) {
+    return This ? This->data : NULL;
+}
+
+static DWORD d3dx_buffer_get_buffer_size(ID3DXBuffer *This) {
+    return This ? This->size : 0;
 }
 
 UINT WINAPI D3DXGetFVFVertexSize(DWORD FVF) {
@@ -1322,6 +1447,13 @@ HRESULT WINAPI D3DXCreateSkinMesh(DWORD NumFaces, DWORD NumVertices, DWORD NumBo
 HRESULT WINAPI D3DXCreateSkinMeshFVF(DWORD NumFaces, DWORD NumVertices, DWORD NumBones, DWORD Options, DWORD FVF, LPDIRECT3DDEVICE8 pD3D, LPD3DXSKINMESH *ppSkinMesh) { return D3DXERR_SKINNINGNOTSUPPORTED; }
 
 // Direct3DCreate8
+// IUnknown-style helpers for IDirect3D8
+static HRESULT D3DAPI d3d8_query_interface(IDirect3D8 *This, REFIID riid, void **ppv) {
+    return common_query_interface(This, riid, ppv);
+}
+static ULONG D3DAPI d3d8_add_ref(IDirect3D8 *This) { return common_add_ref(This); }
+static ULONG D3DAPI d3d8_release(IDirect3D8 *This) { return common_release(This); }
+
 IDirect3D8 *D3DAPI Direct3DCreate8(UINT SDKVersion) {
     if (SDKVersion != D3D_SDK_VERSION) {
         d3d8_gles_log("Invalid SDK version: %u\n", SDKVersion);
@@ -1332,9 +1464,9 @@ IDirect3D8 *D3DAPI Direct3DCreate8(UINT SDKVersion) {
     if (!d3d) return NULL;
 
     static const IDirect3D8Vtbl d3d_vtbl = {
-        .QueryInterface = common_query_interface,
-        .AddRef = common_add_ref,
-        .Release = common_release,
+        .QueryInterface = d3d8_query_interface,
+        .AddRef = d3d8_add_ref,
+        .Release = d3d8_release,
         .RegisterSoftwareDevice = d3d8_register_software_device,
         .GetAdapterCount = d3d8_get_adapter_count,
         .GetAdapterIdentifier = d3d8_get_adapter_identifier,
