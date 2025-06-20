@@ -75,6 +75,8 @@ D3D8 API Call ─┐
 - **C11**, portable CMake, minimal dependencies (only OpenGL ES 1.1, EGL, and standard C `math.h`, `stdio.h`).
 - No C++ code—strictly C11, as specified in `CMakeLists.txt` (`LANGUAGES C`).
 - No external libraries (e.g., zlib, stb) without human review.
+- **Do not** include the reference headers in `lib/min-dx8-sdk` when compiling;
+  the shim builds solely against the headers in `include/`.
 - Use `calloc`/`free` for memory management; avoid dynamic linking (static `.a` only for embedded compatibility).
 - Follow `clang-format` defaults: 4-space indent, 100-column width.
 - Logging controlled by `D3D8_GLES_LOGGING` macro; use `d3d8_gles_log` for debug output.
@@ -126,6 +128,8 @@ project_root/
 │   └── d3d8_to_gles.h   # Interface definitions and function prototypes
 ├── src/
 │   └── d3d8_to_gles.c   # Core shim implementation
+├── lib/
+│   └── min-dx8-sdk/     # Reference DirectX 8 headers (not used for build)
 ├── CMakeLists.txt       # Build configuration
 ├── tests/               # (Future) Test cases
 │   └── fixtures/
