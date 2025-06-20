@@ -163,6 +163,20 @@ typedef struct _D3DINDEXBUFFER_DESC {
     UINT            Size;
 } D3DINDEXBUFFER_DESC;
 
+typedef struct _D3DLOCKED_RECT {
+    int Pitch;
+    void *pBits;
+} D3DLOCKED_RECT;
+
+typedef struct _D3DSURFACE_DESC {
+    D3DFORMAT       Format;
+    D3DRESOURCETYPE Type;
+    DWORD           Usage;
+    D3DPOOL         Pool;
+    UINT            Width;
+    UINT            Height;
+} D3DSURFACE_DESC;
+
 typedef struct _D3DXVECTOR3 {
     float x, y, z;
 } D3DXVECTOR3;

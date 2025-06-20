@@ -41,6 +41,8 @@ static HRESULT D3DAPI d3d8_begin_scene(IDirect3DDevice8 *This);
 static HRESULT D3DAPI d3d8_end_scene(IDirect3DDevice8 *This);
 static HRESULT D3DAPI d3d8_set_stream_source(IDirect3DDevice8 *This, UINT StreamNumber, IDirect3DVertexBuffer8 *pStreamData, UINT Stride);
 static HRESULT D3DAPI d3d8_set_indices(IDirect3DDevice8 *This, IDirect3DIndexBuffer8 *pIndexData, UINT BaseVertexIndex);
+static HRESULT D3DAPI d3d8_create_texture(IDirect3DDevice8 *This, UINT Width, UINT Height, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DTexture8 **ppTexture);
+static HRESULT D3DAPI d3d8_set_texture(IDirect3DDevice8 *This, DWORD Stage, IDirect3DTexture8 *pTexture);
 static HRESULT D3DAPI d3d8_set_viewport(IDirect3DDevice8 *This, CONST D3DVIEWPORT8 *pViewport);
 static HRESULT D3DAPI d3d8_set_transform(IDirect3DDevice8 *This, D3DTRANSFORMSTATETYPE State, CONST D3DXMATRIX *pMatrix);
 static HRESULT D3DAPI d3d8_draw_indexed_primitive(IDirect3DDevice8 *This, D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount);
@@ -81,6 +83,14 @@ static D3DRESOURCETYPE D3DAPI d3d8_ib_get_type(IDirect3DIndexBuffer8 *This);
 static HRESULT D3DAPI d3d8_ib_lock(IDirect3DIndexBuffer8 *This, UINT OffsetToLock, UINT SizeToLock, BYTE **ppbData, DWORD Flags);
 static HRESULT D3DAPI d3d8_ib_unlock(IDirect3DIndexBuffer8 *This);
 static HRESULT D3DAPI d3d8_ib_get_desc(IDirect3DIndexBuffer8 *This, D3DINDEXBUFFER_DESC *pDesc);
+
+// Forward declarations for texture methods
+static HRESULT D3DAPI tex_query_interface(IDirect3DTexture8 *This, REFIID riid, void **ppv);
+static ULONG D3DAPI tex_add_ref(IDirect3DTexture8 *This);
+static ULONG D3DAPI tex_release(IDirect3DTexture8 *This);
+static HRESULT D3DAPI tex_lock_rect(IDirect3DTexture8 *This, UINT Level, D3DLOCKED_RECT *pLockedRect, const RECT *pRect, DWORD Flags);
+static HRESULT D3DAPI tex_unlock_rect(IDirect3DTexture8 *This, UINT Level);
+static HRESULT D3DAPI tex_get_level_desc(IDirect3DTexture8 *This, UINT Level, D3DSURFACE_DESC *pDesc);
 
 // Forward declarations for ID3DXBuffer helper methods
 static HRESULT D3DAPI d3dx_buffer_query_interface(ID3DXBuffer *This, REFIID iid, void **ppv);
@@ -576,6 +586,52 @@ static HRESULT D3DAPI ib_query_interface(IDirect3DIndexBuffer8 *This, REFIID rii
 }
 static ULONG D3DAPI ib_add_ref(IDirect3DIndexBuffer8 *This) { return common_add_ref(This); }
 static ULONG D3DAPI ib_release(IDirect3DIndexBuffer8 *This) { return common_release(This); }
+static HRESULT D3DAPI tex_query_interface(IDirect3DTexture8 *This, REFIID riid, void **ppv) { return common_query_interface(This, riid, ppv); }
+static ULONG D3DAPI tex_add_ref(IDirect3DTexture8 *This) { return common_add_ref(This); }
+static ULONG D3DAPI tex_release(IDirect3DTexture8 *This) {
+    if (This && This->texture) {
+        glDeleteTextures(1, &This->texture->tex_id);
+        free(This->texture->temp_buffer);
+        free(This->texture);
+    }
+    return common_release(This);
+}
+static HRESULT D3DAPI tex_lock_rect(IDirect3DTexture8 *This, UINT Level, D3DLOCKED_RECT *pLockedRect, const RECT *pRect, DWORD Flags) {
+    (void)Flags;
+    if (!pLockedRect || Level >= This->texture->levels) return D3DERR_INVALIDCALL;
+    UINT w = This->texture->width >> Level;
+    UINT h = This->texture->height >> Level;
+    if (w == 0) w = 1;
+    if (h == 0) h = 1;
+    This->texture->temp_buffer = malloc(w * h * 4);
+    if (!This->texture->temp_buffer) return D3DERR_OUTOFVIDEOMEMORY;
+    pLockedRect->Pitch = w * 4;
+    pLockedRect->pBits = This->texture->temp_buffer;
+    return D3D_OK;
+}
+static HRESULT D3DAPI tex_unlock_rect(IDirect3DTexture8 *This, UINT Level) {
+    if (!This->texture->temp_buffer || Level >= This->texture->levels) return D3DERR_INVALIDCALL;
+    UINT w = This->texture->width >> Level;
+    UINT h = This->texture->height >> Level;
+    if (w == 0) w = 1;
+    if (h == 0) h = 1;
+    glBindTexture(GL_TEXTURE_2D, This->texture->tex_id);
+    glTexSubImage2D(GL_TEXTURE_2D, Level, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, This->texture->temp_buffer);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    free(This->texture->temp_buffer);
+    This->texture->temp_buffer = NULL;
+    return D3D_OK;
+}
+static HRESULT D3DAPI tex_get_level_desc(IDirect3DTexture8 *This, UINT Level, D3DSURFACE_DESC *pDesc) {
+    if (!pDesc || Level >= This->texture->levels) return D3DERR_INVALIDCALL;
+    pDesc->Format = This->texture->format;
+    pDesc->Type = D3DRTYPE_TEXTURE;
+    pDesc->Usage = 0;
+    pDesc->Pool = D3DPOOL_MANAGED;
+    pDesc->Width = This->texture->width >> Level ? This->texture->width >> Level : 1;
+    pDesc->Height = This->texture->height >> Level ? This->texture->height >> Level : 1;
+    return D3D_OK;
+}
 
 static const IDirect3DDevice8Vtbl device_vtbl = {
     .QueryInterface = d3d8_device_query_interface,
@@ -600,6 +656,8 @@ static const IDirect3DDevice8Vtbl device_vtbl = {
     .GetGammaRamp = d3d8_get_gamma_ramp,
     .CreateVertexBuffer = d3d8_create_vertex_buffer,
     .CreateIndexBuffer = d3d8_create_index_buffer,
+    .CreateTexture = d3d8_create_texture,
+    .SetTexture = d3d8_set_texture,
     .SetRenderState = d3d8_set_render_state,
     .BeginScene = d3d8_begin_scene,
     .EndScene = d3d8_end_scene,
@@ -993,6 +1051,64 @@ static HRESULT D3DAPI d3d8_ib_get_desc(IDirect3DIndexBuffer8 *This, D3DINDEXBUFF
     pDesc->Usage = This->buffer->usage;
     pDesc->Pool = This->buffer->pool;
     pDesc->Size = This->buffer->length;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_create_texture(IDirect3DDevice8 *This, UINT Width, UINT Height, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DTexture8 **ppTexture) {
+    (void)Usage;
+    (void)Pool;
+    GLES_Texture *tex = calloc(1, sizeof(GLES_Texture));
+    if (!tex) return D3DERR_OUTOFVIDEOMEMORY;
+
+    tex->width = Width;
+    tex->height = Height;
+    tex->levels = Levels ? Levels : 1;
+    tex->format = Format;
+
+    glGenTextures(1, &tex->tex_id);
+    glBindTexture(GL_TEXTURE_2D, tex->tex_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    UINT w = Width, h = Height;
+    for (UINT level = 0; level < tex->levels; level++) {
+        glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        if (w > 1) w >>= 1;
+        if (h > 1) h >>= 1;
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    IDirect3DTexture8 *texture = calloc(1, sizeof(IDirect3DTexture8) + sizeof(IDirect3DTexture8Vtbl));
+    if (!texture) {
+        glDeleteTextures(1, &tex->tex_id);
+        free(tex);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+
+    static const IDirect3DTexture8Vtbl tex_vtbl = {
+        .QueryInterface = tex_query_interface,
+        .AddRef = tex_add_ref,
+        .Release = tex_release,
+        .LockRect = tex_lock_rect,
+        .UnlockRect = tex_unlock_rect,
+        .GetLevelDesc = tex_get_level_desc
+    };
+    texture->lpVtbl = &tex_vtbl;
+    texture->texture = tex;
+    texture->device = This;
+
+    *ppTexture = texture;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_set_texture(IDirect3DDevice8 *This, DWORD Stage, IDirect3DTexture8 *pTexture) {
+    if (Stage != 0) return D3DERR_INVALIDCALL;
+    if (!pTexture) {
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_TEXTURE_2D);
+        return D3D_OK;
+    }
+    glBindTexture(GL_TEXTURE_2D, pTexture->texture->tex_id);
+    glEnable(GL_TEXTURE_2D);
     return D3D_OK;
 }
 
