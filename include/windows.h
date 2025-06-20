@@ -44,6 +44,15 @@ typedef const WCHAR *LPCWSTR;
 
 typedef void *HANDLE;
 typedef HANDLE HINSTANCE;
+typedef HANDLE HMODULE;
+
+typedef intptr_t INT_PTR;
+typedef uintptr_t UINT_PTR;
+typedef intptr_t LONG_PTR;
+typedef uintptr_t ULONG_PTR;
+
+#define DECLARE_HANDLE(name) typedef struct name##__ { int unused; } *name;
+DECLARE_HANDLE(HWND);
 
 typedef struct tagRECT {
     LONG left;
@@ -56,7 +65,10 @@ typedef struct _RGNDATA {
     char unused;
 } RGNDATA, *PRGNDATA, *LPRGNDATA;
 
-#define DECLARE_HANDLE(name) typedef struct name##__ { int unused; } *name;
+typedef LONG_PTR LPARAM;
+typedef UINT_PTR WPARAM;
+typedef LONG_PTR LRESULT;
+
 
 typedef long HRESULT;
 
@@ -70,6 +82,10 @@ typedef long HRESULT;
 #define E_OUTOFMEMORY ((HRESULT)0x8007000EL)
 
 #define MAKE_HRESULT(sev,fac,code) ((HRESULT)(((unsigned int)(sev)<<31) | ((unsigned int)(fac)<<16) | ((unsigned int)(code))))
+#ifndef _FACDD
+#define _FACDD 0x876
+#endif
+#define MAKE_DDHRESULT(code) MAKE_HRESULT(1, _FACDD, (code))
 
 #ifdef __cplusplus
 }
