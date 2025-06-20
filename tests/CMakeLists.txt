@@ -5,3 +5,11 @@ add_test(NAME capability_test COMMAND capability_test)
 add_executable(caps_flags_test caps_flags_test.c)
 target_link_libraries(caps_flags_test PRIVATE d3d8_to_gles)
 add_test(NAME caps_flags_test COMMAND caps_flags_test)
+
+add_executable(box_render_test box_render_test.c)
+target_link_libraries(box_render_test PRIVATE d3d8_to_gles)
+add_test(NAME box_render_test COMMAND box_render_test)
+
+add_executable(sphere_stub_test sphere_stub_test.c)
+target_link_libraries(sphere_stub_test PRIVATE d3d8_to_gles)
+add_test(NAME sphere_stub_test COMMAND sphere_stub_test)
