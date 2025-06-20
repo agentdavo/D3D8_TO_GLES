@@ -4,7 +4,7 @@ This project provides a lightweight shim to translate DirectX 8 (D3D8) API calls
 
 ## Features
 - Implements key D3D8 interfaces: `IDirect3D8`, `IDirect3DDevice8`, `IDirect3DVertexBuffer8`, `IDirect3DIndexBuffer8`.
-- Supports D3DX utilities: `ID3DXMesh`, `ID3DXMatrixStack`, `D3DXCreateBox`, and matrix/vector operations (`D3DXMatrix*`, `D3DXVec3*`).
+- Supports D3DX utilities: `ID3DXMesh`, `ID3DXMatrixStack`, shape helpers `D3DXCreateBox` and `D3DXCreateSphere`, and matrix/vector operations (`D3DXMatrix*`, `D3DXVec3*`).
 - Handles rendering with `DrawIndexedPrimitive` using OpenGL ES 1.1’s fixed-function pipeline.
 - Converts D3D8 transformations to OpenGL ES 1.1 format, ensuring correct coordinate system handling.
 - Portable C11 implementation with minimal dependencies (OpenGL ES 1.1, EGL, standard C libraries).

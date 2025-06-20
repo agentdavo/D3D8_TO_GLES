@@ -1356,7 +1356,189 @@ D3DXMATRIX* WINAPI D3DXMatrixRotationYawPitchRoll(D3DXMATRIX *pOut, FLOAT Yaw, F
 // Stubbed D3DX functions
 HRESULT WINAPI D3DXCreatePolygon(LPDIRECT3DDEVICE8 pDevice, FLOAT Length, UINT Sides, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency) { return D3DXERR_NOTAVAILABLE; }
 HRESULT WINAPI D3DXCreateCylinder(LPDIRECT3DDEVICE8 pDevice, FLOAT Radius1, FLOAT Radius2, FLOAT Length, UINT Slices, UINT Stacks, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency) { return D3DXERR_NOTAVAILABLE; }
-HRESULT WINAPI D3DXCreateSphere(LPDIRECT3DDEVICE8 pDevice, FLOAT Radius, UINT Slices, UINT Stacks, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency) { return D3DXERR_NOTAVAILABLE; }
+HRESULT WINAPI D3DXCreateSphere(LPDIRECT3DDEVICE8 pDevice, FLOAT Radius, UINT Slices, UINT Stacks, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency) {
+    if (!pDevice || Radius <= 0.0f || Slices < 3 || Stacks < 2 || !ppMesh)
+        return D3DERR_INVALIDCALL;
+
+    DWORD num_vertices = (Stacks + 1) * (Slices + 1);
+    DWORD num_faces = Stacks * Slices * 2;
+    if (num_vertices > 0xFFFF)
+        return D3DERR_INVALIDCALL;
+
+    VertexPN *vertices = calloc(num_vertices, sizeof(VertexPN));
+    WORD *indices = calloc(num_faces * 3, sizeof(WORD));
+    if (!vertices || !indices) {
+        free(vertices);
+        free(indices);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+
+    const float pi = 3.14159265359f;
+    DWORD v = 0;
+    for (UINT i = 0; i <= Stacks; i++) {
+        float phi = (float)i / (float)Stacks * pi;
+        float y = cosf(phi);
+        float r = sinf(phi);
+        for (UINT j = 0; j <= Slices; j++) {
+            float theta = (float)j / (float)Slices * 2.0f * pi;
+            float x = r * cosf(theta);
+            float z = r * sinf(theta);
+            vertices[v].x = x * Radius;
+            vertices[v].y = y * Radius;
+            vertices[v].z = z * Radius;
+            vertices[v].nx = x;
+            vertices[v].ny = y;
+            vertices[v].nz = z;
+            v++;
+        }
+    }
+
+    DWORD idx = 0;
+    for (UINT i = 0; i < Stacks; i++) {
+        for (UINT j = 0; j < Slices; j++) {
+            WORD v0 = (WORD)(i * (Slices + 1) + j);
+            WORD v1 = (WORD)((i + 1) * (Slices + 1) + j);
+            WORD v2 = (WORD)(v0 + 1);
+            WORD v3 = (WORD)(v1 + 1);
+            indices[idx++] = v0;
+            indices[idx++] = v1;
+            indices[idx++] = v2;
+            indices[idx++] = v2;
+            indices[idx++] = v1;
+            indices[idx++] = v3;
+        }
+    }
+
+    DWORD fvf = D3DFVF_XYZ | D3DFVF_NORMAL;
+    UINT vb_size = num_vertices * sizeof(VertexPN);
+    UINT ib_size = num_faces * 3 * sizeof(WORD);
+    DWORD options = D3DXMESH_MANAGED;
+
+    IDirect3DVertexBuffer8 *vb;
+    HRESULT hr = pDevice->lpVtbl->CreateVertexBuffer(pDevice, vb_size, D3DUSAGE_WRITEONLY, fvf, D3DPOOL_MANAGED, &vb);
+    if (FAILED(hr)) {
+        free(vertices);
+        free(indices);
+        return hr;
+    }
+
+    BYTE *vb_data;
+    hr = vb->lpVtbl->Lock(vb, 0, vb_size, &vb_data, 0);
+    if (SUCCEEDED(hr)) {
+        memcpy(vb_data, vertices, vb_size);
+        vb->lpVtbl->Unlock(vb);
+    } else {
+        vb->lpVtbl->Release(vb);
+        free(vertices);
+        free(indices);
+        return hr;
+    }
+
+    IDirect3DIndexBuffer8 *ib;
+    hr = pDevice->lpVtbl->CreateIndexBuffer(pDevice, ib_size, D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_MANAGED, &ib);
+    if (FAILED(hr)) {
+        vb->lpVtbl->Release(vb);
+        free(vertices);
+        free(indices);
+        return hr;
+    }
+
+    BYTE *ib_data;
+    hr = ib->lpVtbl->Lock(ib, 0, ib_size, &ib_data, 0);
+    if (SUCCEEDED(hr)) {
+        memcpy(ib_data, indices, ib_size);
+        ib->lpVtbl->Unlock(ib);
+    } else {
+        vb->lpVtbl->Release(vb);
+        ib->lpVtbl->Release(ib);
+        free(vertices);
+        free(indices);
+        return hr;
+    }
+
+    free(vertices);
+    free(indices);
+
+    ID3DXMesh *mesh = calloc(1, sizeof(ID3DXMesh) + sizeof(ID3DXMeshVtbl));
+    if (!mesh) {
+        vb->lpVtbl->Release(vb);
+        ib->lpVtbl->Release(ib);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+
+    mesh->attrib_table = calloc(1, sizeof(D3DXATTRIBUTERANGE));
+    if (!mesh->attrib_table) {
+        vb->lpVtbl->Release(vb);
+        ib->lpVtbl->Release(ib);
+        free(mesh);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+    mesh->attrib_table[0].AttribId = 0;
+    mesh->attrib_table[0].FaceStart = 0;
+    mesh->attrib_table[0].FaceCount = num_faces;
+    mesh->attrib_table[0].VertexStart = 0;
+    mesh->attrib_table[0].VertexCount = num_vertices;
+    mesh->attrib_table_size = 1;
+
+    mesh->attrib_buffer = calloc(num_faces, sizeof(DWORD));
+    if (!mesh->attrib_buffer) {
+        vb->lpVtbl->Release(vb);
+        ib->lpVtbl->Release(ib);
+        free(mesh->attrib_table);
+        free(mesh);
+        return D3DERR_OUTOFVIDEOMEMORY;
+    }
+    for (DWORD i = 0; i < num_faces; i++) mesh->attrib_buffer[i] = 0;
+
+    static const ID3DXMeshVtbl mesh_vtbl = {
+        .QueryInterface = d3dx_mesh_query_interface,
+        .AddRef = d3dx_mesh_add_ref,
+        .Release = d3dx_mesh_release,
+        .DrawSubset = d3dx_mesh_draw_subset,
+        .GetNumFaces = d3dx_mesh_get_num_faces,
+        .GetNumVertices = d3dx_mesh_get_num_vertices,
+        .GetFVF = d3dx_mesh_get_fvf,
+        .GetDeclaration = d3dx_mesh_get_declaration,
+        .GetOptions = d3dx_mesh_get_options,
+        .GetDevice = d3dx_mesh_get_device,
+        .CloneMeshFVF = d3dx_mesh_clone_mesh_fvf,
+        .CloneMesh = d3dx_mesh_clone_mesh,
+        .GetVertexBuffer = d3dx_mesh_get_vertex_buffer,
+        .GetIndexBuffer = d3dx_mesh_get_index_buffer,
+        .LockVertexBuffer = d3dx_mesh_lock_vertex_buffer,
+        .UnlockVertexBuffer = d3dx_mesh_unlock_vertex_buffer,
+        .LockIndexBuffer = d3dx_mesh_lock_index_buffer,
+        .UnlockIndexBuffer = d3dx_mesh_unlock_index_buffer,
+        .GetAttributeTable = d3dx_mesh_get_attribute_table,
+        .ConvertPointRepsToAdjacency = d3dx_mesh_convert_point_reps_to_adjacency,
+        .ConvertAdjacencyToPointReps = d3dx_mesh_convert_adjacency_to_point_reps,
+        .GenerateAdjacency = d3dx_mesh_generate_adjacency,
+        .LockAttributeBuffer = d3dx_mesh_lock_attribute_buffer,
+        .UnlockAttributeBuffer = d3dx_mesh_unlock_attribute_buffer,
+        .Optimize = d3dx_mesh_optimize,
+        .OptimizeInplace = d3dx_mesh_optimize_inplace
+    };
+
+    mesh->pVtbl = &mesh_vtbl;
+    mesh->device = pDevice;
+    mesh->vb = vb;
+    mesh->ib = ib;
+    mesh->num_vertices = num_vertices;
+    mesh->num_faces = num_faces;
+    mesh->fvf = fvf;
+    mesh->options = options;
+
+    if (ppAdjacency) {
+        hr = D3DXCreateBuffer(num_faces * 3 * sizeof(DWORD), ppAdjacency);
+        if (SUCCEEDED(hr)) {
+            DWORD *adj = (DWORD *)(*ppAdjacency)->pVtbl->GetBufferPointer(*ppAdjacency);
+            memset(adj, 0xFFFFFFFF, num_faces * 3 * sizeof(DWORD));
+        }
+    }
+
+    *ppMesh = mesh;
+    return D3D_OK;
+}
 HRESULT WINAPI D3DXCreateTorus(LPDIRECT3DDEVICE8 pDevice, FLOAT InnerRadius, FLOAT OuterRadius, UINT Sides, UINT Rings, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency) { return D3DXERR_NOTAVAILABLE; }
 HRESULT WINAPI D3DXCreateTeapot(LPDIRECT3DDEVICE8 pDevice, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency) { return D3DXERR_NOTAVAILABLE; }
 HRESULT WINAPI D3DXCreateTextA(LPDIRECT3DDEVICE8 pDevice, HDC hDC, LPCSTR pText, FLOAT Deviation, FLOAT Extrusion, LPD3DXMESH *ppMesh, LPD3DXBUFFER *ppAdjacency, LPGLYPHMETRICSFLOAT pGlyphMetrics) { return D3DXERR_NOTAVAILABLE; }
