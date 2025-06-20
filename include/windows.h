@@ -46,24 +46,41 @@ typedef void *HANDLE;
 typedef HANDLE HINSTANCE;
 typedef HANDLE HMODULE;
 
+#ifndef HDC
 typedef void *HDC;
+#endif
+
+#ifndef HFONT
 typedef void *HFONT;
+#endif
+
+#ifndef PVOID
 typedef void *PVOID;
+#endif
 
+#ifndef LOGFONT_DEFINED
 typedef struct tagLOGFONT {
-    int dummy;
+  int dummy;
 } LOGFONT, *PLOGFONT, *LPLOGFONT;
+#define LOGFONT_DEFINED
+#endif
 
+#ifndef GLYPHMETRICSFLOAT_DEFINED
 typedef struct tagGLYPHMETRICSFLOAT {
-    float dummy;
+  float dummy;
 } GLYPHMETRICSFLOAT, *LPGLYPHMETRICSFLOAT;
+#define GLYPHMETRICSFLOAT_DEFINED
+#endif
 
 typedef intptr_t INT_PTR;
 typedef uintptr_t UINT_PTR;
 typedef intptr_t LONG_PTR;
 typedef uintptr_t ULONG_PTR;
 
-#define DECLARE_HANDLE(name) typedef struct name##__ { int unused; } *name;
+#define DECLARE_HANDLE(name)                                                   \
+  typedef struct name##__ {                                                    \
+    int unused;                                                                \
+  } *name;
 DECLARE_HANDLE(HWND);
 #ifndef HMONITOR_DECLARED
 #define HMONITOR_DECLARED
@@ -71,20 +88,19 @@ DECLARE_HANDLE(HMONITOR);
 #endif
 
 typedef struct tagRECT {
-    LONG left;
-    LONG top;
-    LONG right;
-    LONG bottom;
+  LONG left;
+  LONG top;
+  LONG right;
+  LONG bottom;
 } RECT, *PRECT, *LPRECT;
 
 typedef struct _RGNDATA {
-    char unused;
+  char unused;
 } RGNDATA, *PRGNDATA, *LPRGNDATA;
 
 typedef LONG_PTR LPARAM;
 typedef UINT_PTR WPARAM;
 typedef LONG_PTR LRESULT;
-
 
 typedef long HRESULT;
 
@@ -97,7 +113,9 @@ typedef long HRESULT;
 #define E_NOINTERFACE ((HRESULT)0x80004002L)
 #define E_OUTOFMEMORY ((HRESULT)0x8007000EL)
 
-#define MAKE_HRESULT(sev,fac,code) ((HRESULT)(((unsigned int)(sev)<<31) | ((unsigned int)(fac)<<16) | ((unsigned int)(code))))
+#define MAKE_HRESULT(sev, fac, code)                                           \
+  ((HRESULT)(((unsigned int)(sev) << 31) | ((unsigned int)(fac) << 16) |       \
+             ((unsigned int)(code))))
 #ifndef _FACDD
 #define _FACDD 0x876
 #endif
