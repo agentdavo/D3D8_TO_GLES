@@ -60,9 +60,17 @@ project_root/
 │   └── d3d8_to_gles.h   # Interface definitions and function prototypes
 ├── src/
 │   └── d3d8_to_gles.c   # Core shim implementation
+├── lib/
+│   └── min-dx8-sdk/     # Reference DirectX 8 headers (not used for build)
 ├── CMakeLists.txt       # Build configuration
 ├── AGENTS.md            # Guidance for AI code agents
 ```
+
+The `lib/min-dx8-sdk` directory includes a trimmed copy of Microsoft’s
+DirectX 8 SDK headers. These files are provided solely for reference when
+developing or verifying the shim’s interfaces. The shim is compiled only
+against the headers in `include/` and does **not** use the SDK headers when
+building.
 
 ## Contributing
 See `AGENTS.md` for guidance on extending the shim, especially for AI-assisted contributions. Key areas for improvement:
