@@ -171,7 +171,20 @@ static void setup_vertex_attributes(DWORD fvf, BYTE *data, UINT stride) {
     } else {
         glDisableClientState(GL_NORMAL_ARRAY);
     }
-    // Add support for other FVF components (e.g., D3DFVF_DIFFUSE, D3DFVF_TEX1) as needed
+    if (fvf & D3DFVF_DIFFUSE) {
+        glEnableClientState(GL_COLOR_ARRAY);
+        glColorPointer(4, GL_UNSIGNED_BYTE, stride, data + offset);
+        offset += 4;
+    } else {
+        glDisableClientState(GL_COLOR_ARRAY);
+    }
+    if (fvf & D3DFVF_TEX1) {
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        glTexCoordPointer(2, GL_FLOAT, stride, data + offset);
+        offset += 8;
+    } else {
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    }
 }
 
 // Math functions
@@ -1040,23 +1053,31 @@ static DWORD d3dx_buffer_get_buffer_size(ID3DXBuffer *This) {
 UINT WINAPI D3DXGetFVFVertexSize(DWORD FVF) {
     if (!(FVF & D3DFVF_XYZ)) return 0;
 
-    if (FVF & ~(D3DFVF_XYZ | D3DFVF_NORMAL)) return 0;
+    if (FVF & ~(D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE | D3DFVF_TEX1))
+        return 0;
 
     UINT size = 3 * sizeof(float);
     if (FVF & D3DFVF_NORMAL) size += 3 * sizeof(float);
+    if (FVF & D3DFVF_DIFFUSE) size += sizeof(DWORD);
+    if (FVF & D3DFVF_TEX1) size += 2 * sizeof(float);
     return size;
 }
 
 HRESULT WINAPI D3DXDeclaratorFromFVF(DWORD FVF,
                                      DWORD Declaration[MAX_FVF_DECL_SIZE]) {
     if (!(FVF & D3DFVF_XYZ)) return D3DERR_INVALIDCALL;
-    if (FVF & ~(D3DFVF_XYZ | D3DFVF_NORMAL)) return D3DERR_INVALIDCALL;
+    if (FVF & ~(D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE | D3DFVF_TEX1))
+        return D3DERR_INVALIDCALL;
 
     int i = 0;
     Declaration[i++] = D3DVSD_STREAM(0);
     Declaration[i++] = D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT3);
     if (FVF & D3DFVF_NORMAL)
         Declaration[i++] = D3DVSD_REG(D3DVSDE_NORMAL, D3DVSDT_FLOAT3);
+    if (FVF & D3DFVF_DIFFUSE)
+        Declaration[i++] = D3DVSD_REG(D3DVSDE_DIFFUSE, D3DVSDT_D3DCOLOR);
+    if (FVF & D3DFVF_TEX1)
+        Declaration[i++] = D3DVSD_REG(D3DVSDE_TEXCOORD0, D3DVSDT_FLOAT2);
     Declaration[i++] = D3DVSD_END();
 
     for (; i < MAX_FVF_DECL_SIZE; i++) Declaration[i] = D3DVSD_END();
