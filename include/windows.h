@@ -46,6 +46,18 @@ typedef void *HANDLE;
 typedef HANDLE HINSTANCE;
 typedef HANDLE HMODULE;
 
+typedef void *HDC;
+typedef void *HFONT;
+typedef void *PVOID;
+
+typedef struct tagLOGFONT {
+    int dummy;
+} LOGFONT, *PLOGFONT, *LPLOGFONT;
+
+typedef struct tagGLYPHMETRICSFLOAT {
+    float dummy;
+} GLYPHMETRICSFLOAT, *LPGLYPHMETRICSFLOAT;
+
 typedef intptr_t INT_PTR;
 typedef uintptr_t UINT_PTR;
 typedef intptr_t LONG_PTR;
@@ -53,6 +65,10 @@ typedef uintptr_t ULONG_PTR;
 
 #define DECLARE_HANDLE(name) typedef struct name##__ { int unused; } *name;
 DECLARE_HANDLE(HWND);
+#ifndef HMONITOR_DECLARED
+#define HMONITOR_DECLARED
+DECLARE_HANDLE(HMONITOR);
+#endif
 
 typedef struct tagRECT {
     LONG left;
