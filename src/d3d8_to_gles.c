@@ -925,6 +925,32 @@ HRESULT WINAPI D3DXCreateBuffer(DWORD NumBytes, LPD3DXBUFFER *ppBuffer) {
     return D3D_OK;
 }
 
+UINT WINAPI D3DXGetFVFVertexSize(DWORD FVF) {
+    if (!(FVF & D3DFVF_XYZ)) return 0;
+
+    if (FVF & ~(D3DFVF_XYZ | D3DFVF_NORMAL)) return 0;
+
+    UINT size = 3 * sizeof(float);
+    if (FVF & D3DFVF_NORMAL) size += 3 * sizeof(float);
+    return size;
+}
+
+HRESULT WINAPI D3DXDeclaratorFromFVF(DWORD FVF,
+                                     DWORD Declaration[MAX_FVF_DECL_SIZE]) {
+    if (!(FVF & D3DFVF_XYZ)) return D3DERR_INVALIDCALL;
+    if (FVF & ~(D3DFVF_XYZ | D3DFVF_NORMAL)) return D3DERR_INVALIDCALL;
+
+    int i = 0;
+    Declaration[i++] = D3DVSD_STREAM(0);
+    Declaration[i++] = D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT3);
+    if (FVF & D3DFVF_NORMAL)
+        Declaration[i++] = D3DVSD_REG(D3DVSDE_NORMAL, D3DVSDT_FLOAT3);
+    Declaration[i++] = D3DVSD_END();
+
+    for (; i < MAX_FVF_DECL_SIZE; i++) Declaration[i] = D3DVSD_END();
+    return D3D_OK;
+}
+
 typedef struct {
     float x, y, z; // Position
     float nx, ny, nz; // Normal
