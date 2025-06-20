@@ -15,6 +15,35 @@ void d3d8_gles_log(const char *format, ...) {
 }
 #endif
 
+// Forward declarations for device methods used before definition
+static HRESULT D3DAPI d3d8_test_cooperative_level(IDirect3DDevice8 *This);
+static UINT D3DAPI d3d8_get_available_texture_mem(IDirect3DDevice8 *This);
+static HRESULT D3DAPI d3d8_resource_manager_discard_bytes(IDirect3DDevice8 *This, DWORD Bytes);
+static HRESULT D3DAPI d3d8_get_direct3d(IDirect3DDevice8 *This, IDirect3D8 **ppD3D8);
+static HRESULT D3DAPI device_get_device_caps(IDirect3DDevice8 *This, D3DCAPS8 *pCaps);
+static HRESULT D3DAPI d3d8_get_display_mode(IDirect3DDevice8 *This, D3DDISPLAYMODE *pMode);
+static HRESULT D3DAPI d3d8_get_creation_parameters(IDirect3DDevice8 *This, D3DDEVICE_CREATION_PARAMETERS *pParameters);
+static HRESULT D3DAPI d3d8_set_cursor_properties(IDirect3DDevice8 *This, UINT XHotSpot, UINT YHotSpot, IDirect3DSurface8 *pCursorBitmap);
+static void D3DAPI d3d8_set_cursor_position(IDirect3DDevice8 *This, UINT XScreenSpace, UINT YScreenSpace, DWORD Flags);
+static BOOL D3DAPI d3d8_show_cursor(IDirect3DDevice8 *This, BOOL bShow);
+static HRESULT D3DAPI d3d8_create_additional_swap_chain(IDirect3DDevice8 *This, D3DPRESENT_PARAMETERS *pPresentationParameters, IDirect3DSwapChain8 **pSwapChain);
+static HRESULT D3DAPI d3d8_reset(IDirect3DDevice8 *This, D3DPRESENT_PARAMETERS *pPresentationParameters);
+static HRESULT D3DAPI d3d8_present(IDirect3DDevice8 *This, CONST RECT *pSourceRect, CONST RECT *pDestRect, HWND hDestWindowOverride, CONST RGNDATA *pDirtyRegion);
+static HRESULT D3DAPI d3d8_get_back_buffer(IDirect3DDevice8 *This, UINT BackBuffer, D3DBACKBUFFER_TYPE Type, IDirect3DSurface8 **ppBackBuffer);
+static HRESULT D3DAPI d3d8_get_raster_status(IDirect3DDevice8 *This, D3DRASTER_STATUS *pRasterStatus);
+static void D3DAPI d3d8_set_gamma_ramp(IDirect3DDevice8 *This, DWORD Flags, CONST D3DGAMMARAMP *pRamp);
+static void D3DAPI d3d8_get_gamma_ramp(IDirect3DDevice8 *This, D3DGAMMARAMP *pRamp);
+static HRESULT D3DAPI d3d8_create_vertex_buffer(IDirect3DDevice8 *This, UINT Length, DWORD Usage, DWORD FVF, D3DPOOL Pool, IDirect3DVertexBuffer8 **ppVertexBuffer);
+static HRESULT D3DAPI d3d8_create_index_buffer(IDirect3DDevice8 *This, UINT Length, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DIndexBuffer8 **ppIndexBuffer);
+static HRESULT D3DAPI d3d8_set_render_state(IDirect3DDevice8 *This, D3DRENDERSTATETYPE state, DWORD value);
+static HRESULT D3DAPI d3d8_begin_scene(IDirect3DDevice8 *This);
+static HRESULT D3DAPI d3d8_end_scene(IDirect3DDevice8 *This);
+static HRESULT D3DAPI d3d8_set_stream_source(IDirect3DDevice8 *This, UINT StreamNumber, IDirect3DVertexBuffer8 *pStreamData, UINT Stride);
+static HRESULT D3DAPI d3d8_set_indices(IDirect3DDevice8 *This, IDirect3DIndexBuffer8 *pIndexData, UINT BaseVertexIndex);
+static HRESULT D3DAPI d3d8_set_viewport(IDirect3DDevice8 *This, CONST D3DVIEWPORT8 *pViewport);
+static HRESULT D3DAPI d3d8_set_transform(IDirect3DDevice8 *This, D3DTRANSFORMSTATETYPE State, CONST D3DXMATRIX *pMatrix);
+static HRESULT D3DAPI d3d8_draw_indexed_primitive(IDirect3DDevice8 *This, D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount);
+
 // Helper: Map Direct3D render state to OpenGL ES
 static void set_render_state(GLES_Device *gles, D3DRENDERSTATETYPE state, DWORD value) {
     switch (state) {
@@ -238,6 +267,24 @@ D3DXVECTOR3* WINAPI D3DXVec3TransformCoord(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 
         pOut->z /= w;
     }
     return pOut;
+}
+
+D3DXVECTOR3* WINAPI D3DXVec3Subtract(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV1, CONST D3DXVECTOR3 *pV2) {
+    pOut->x = pV1->x - pV2->x;
+    pOut->y = pV1->y - pV2->y;
+    pOut->z = pV1->z - pV2->z;
+    return pOut;
+}
+
+D3DXVECTOR3* WINAPI D3DXVec3Cross(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV1, CONST D3DXVECTOR3 *pV2) {
+    pOut->x = pV1->y * pV2->z - pV1->z * pV2->y;
+    pOut->y = pV1->z * pV2->x - pV1->x * pV2->z;
+    pOut->z = pV1->x * pV2->y - pV1->y * pV2->x;
+    return pOut;
+}
+
+FLOAT WINAPI D3DXVec3Dot(CONST D3DXVECTOR3 *pV1, CONST D3DXVECTOR3 *pV2) {
+    return pV1->x * pV2->x + pV1->y * pV2->y + pV1->z * pV2->z;
 }
 
 // ID3DXMatrixStack methods
@@ -485,12 +532,13 @@ static HRESULT D3DAPI d3dx_mesh_optimize_inplace(ID3DXMesh *This, DWORD Flags, C
 }
 
 // IDirect3D8 methods
-static HRESULT D3DAPI d3d8_query_interface(IDirect3D8 *This, REFIID riid, void **ppvObj) {
+static HRESULT D3DAPI common_query_interface(void *This, REFIID riid, void **ppvObj) {
+    (void)This; (void)riid; (void)ppvObj;
     return D3DERR_INVALIDCALL;
 }
 
-static ULONG D3DAPI d3d8_add_ref(IDirect3D8 *This) { return 1; }
-static ULONG D3DAPI d3d8_release(IDirect3D8 *This) { free(This); return 0; }
+static ULONG D3DAPI common_add_ref(void *This) { (void)This; return 1; }
+static ULONG D3DAPI common_release(void *This) { free(This); return 0; }
 static HRESULT D3DAPI d3d8_register_software_device(IDirect3D8 *This, void *pInitializeFunction) { return D3DERR_NOTAVAILABLE; }
 static UINT D3DAPI d3d8_get_adapter_count(IDirect3D8 *This) { return 1; }
 static HRESULT D3DAPI d3d8_get_adapter_identifier(IDirect3D8 *This, UINT Adapter, DWORD Flags, D3DADAPTER_IDENTIFIER8 *pIdentifier) { return D3DERR_NOTAVAILABLE; }
@@ -562,14 +610,14 @@ static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVT
     }
 
     static const IDirect3DDevice8Vtbl device_vtbl = {
-        .QueryInterface = d3d8_query_interface,
-        .AddRef = d3d8_add_ref,
-        .Release = d3d8_release,
+        .QueryInterface = common_query_interface,
+        .AddRef = common_add_ref,
+        .Release = common_release,
         .TestCooperativeLevel = d3d8_test_cooperative_level,
         .GetAvailableTextureMem = d3d8_get_available_texture_mem,
         .ResourceManagerDiscardBytes = d3d8_resource_manager_discard_bytes,
         .GetDirect3D = d3d8_get_direct3d,
-        .GetDeviceCaps = d3d8_get_device_caps,
+        .GetDeviceCaps = device_get_device_caps,
         .GetDisplayMode = d3d8_get_display_mode,
         .GetCreationParameters = d3d8_get_creation_parameters,
         .SetCursorProperties = d3d8_set_cursor_properties,
@@ -584,7 +632,7 @@ static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVT
         .GetGammaRamp = d3d8_get_gamma_ramp,
         .CreateVertexBuffer = d3d8_create_vertex_buffer,
         .CreateIndexBuffer = d3d8_create_index_buffer,
-        .SetRenderState = set_render_state,
+        .SetRenderState = d3d8_set_render_state,
         .BeginScene = d3d8_begin_scene,
         .EndScene = d3d8_end_scene,
         .SetStreamSource = d3d8_set_stream_source,
@@ -609,7 +657,7 @@ static HRESULT D3DAPI d3d8_get_direct3d(IDirect3DDevice8 *This, IDirect3D8 **ppD
     *ppD3D8 = This->d3d8;
     return D3D_OK;
 }
-static HRESULT D3DAPI d3d8_get_device_caps(IDirect3DDevice8 *This, D3DCAPS8 *pCaps) {
+static HRESULT D3DAPI device_get_device_caps(IDirect3DDevice8 *This, D3DCAPS8 *pCaps) {
     fill_d3d_caps(pCaps, D3DDEVTYPE_HAL);
     return D3D_OK;
 }
@@ -716,9 +764,9 @@ static HRESULT D3DAPI d3d8_create_vertex_buffer(IDirect3DDevice8 *This, UINT Len
     }
 
     static const IDirect3DVertexBuffer8Vtbl vb_vtbl = {
-        .QueryInterface = d3d8_query_interface,
-        .AddRef = d3d8_add_ref,
-        .Release = d3d8_release,
+        .QueryInterface = common_query_interface,
+        .AddRef = common_add_ref,
+        .Release = common_release,
         .GetDevice = d3d8_vb_get_device,
         .SetPrivateData = d3d8_vb_set_private_data,
         .GetPrivateData = d3d8_vb_get_private_data,
@@ -736,6 +784,11 @@ static HRESULT D3DAPI d3d8_create_vertex_buffer(IDirect3DDevice8 *This, UINT Len
     vb->device = This;
 
     *ppVertexBuffer = vb;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_set_render_state(IDirect3DDevice8 *This, D3DRENDERSTATETYPE state, DWORD value) {
+    set_render_state(This->gles, state, value);
     return D3D_OK;
 }
 
@@ -762,9 +815,9 @@ static HRESULT D3DAPI d3d8_create_index_buffer(IDirect3DDevice8 *This, UINT Leng
     }
 
     static const IDirect3DIndexBuffer8Vtbl ib_vtbl = {
-        .QueryInterface = d3d8_query_interface,
-        .AddRef = d3d8_add_ref,
-        .Release = d3d8_release,
+        .QueryInterface = common_query_interface,
+        .AddRef = common_add_ref,
+        .Release = common_release,
         .GetDevice = d3d8_ib_get_device,
         .SetPrivateData = d3d8_ib_set_private_data,
         .GetPrivateData = d3d8_ib_get_private_data,
@@ -1279,9 +1332,9 @@ IDirect3D8 *D3DAPI Direct3DCreate8(UINT SDKVersion) {
     if (!d3d) return NULL;
 
     static const IDirect3D8Vtbl d3d_vtbl = {
-        .QueryInterface = d3d8_query_interface,
-        .AddRef = d3d8_add_ref,
-        .Release = d3d8_release,
+        .QueryInterface = common_query_interface,
+        .AddRef = common_add_ref,
+        .Release = common_release,
         .RegisterSoftwareDevice = d3d8_register_software_device,
         .GetAdapterCount = d3d8_get_adapter_count,
         .GetAdapterIdentifier = d3d8_get_adapter_identifier,
