@@ -337,7 +337,14 @@ static void d3d_to_gl_matrix(GLfloat *gl_matrix, const D3DXMATRIX *d3d_matrix) {
 static void setup_vertex_attributes(DWORD fvf, BYTE *data, UINT stride) {
     GLint offset = 0;
 
-    if (fvf & D3DFVF_XYZ) {
+    if (fvf & D3DFVF_XYZRHW) {
+        glDisable(GL_DEPTH_TEST);
+        glMatrixMode(GL_MODELVIEW);
+        glLoadIdentity();
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glVertexPointer(4, GL_FLOAT, stride, data + offset);
+        offset += 16;
+    } else if (fvf & D3DFVF_XYZ) {
         glEnableClientState(GL_VERTEX_ARRAY);
         glVertexPointer(3, GL_FLOAT, stride, data + offset);
         offset += 12;
@@ -1534,13 +1541,13 @@ static DWORD d3dx_buffer_get_buffer_size(ID3DXBuffer *This) {
 }
 
 UINT WINAPI D3DXGetFVFVertexSize(DWORD FVF) {
-    if (!(FVF & D3DFVF_XYZ)) return 0;
+    if (!(FVF & (D3DFVF_XYZ | D3DFVF_XYZRHW))) return 0;
 
-    if (FVF & ~(D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE | D3DFVF_SPECULAR |
-                 D3DFVF_TEX1 | D3DFVF_TEX2))
+    if (FVF & ~(D3DFVF_XYZ | D3DFVF_XYZRHW | D3DFVF_NORMAL | D3DFVF_DIFFUSE |
+                 D3DFVF_SPECULAR | D3DFVF_TEX1 | D3DFVF_TEX2))
         return 0;
 
-    UINT size = 3 * sizeof(float);
+    UINT size = (FVF & D3DFVF_XYZRHW) ? 4 * sizeof(float) : 3 * sizeof(float);
     if (FVF & D3DFVF_NORMAL) size += 3 * sizeof(float);
     if (FVF & D3DFVF_DIFFUSE) size += sizeof(DWORD);
     if (FVF & D3DFVF_SPECULAR) size += sizeof(DWORD);
@@ -1553,14 +1560,18 @@ UINT WINAPI D3DXGetFVFVertexSize(DWORD FVF) {
 
 HRESULT WINAPI D3DXDeclaratorFromFVF(DWORD FVF,
                                      DWORD Declaration[MAX_FVF_DECL_SIZE]) {
-    if (!(FVF & D3DFVF_XYZ)) return D3DERR_INVALIDCALL;
-    if (FVF & ~(D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE | D3DFVF_SPECULAR |
-                D3DFVF_TEX1 | D3DFVF_TEX2))
+    if (!(FVF & (D3DFVF_XYZ | D3DFVF_XYZRHW))) return D3DERR_INVALIDCALL;
+    if ((FVF & D3DFVF_XYZ) && (FVF & D3DFVF_XYZRHW)) return D3DERR_INVALIDCALL;
+    if (FVF & ~(D3DFVF_XYZ | D3DFVF_XYZRHW | D3DFVF_NORMAL | D3DFVF_DIFFUSE |
+                D3DFVF_SPECULAR | D3DFVF_TEX1 | D3DFVF_TEX2))
         return D3DERR_INVALIDCALL;
 
     int i = 0;
     Declaration[i++] = D3DVSD_STREAM(0);
-    Declaration[i++] = D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT3);
+    if (FVF & D3DFVF_XYZRHW)
+        Declaration[i++] = D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT4);
+    else
+        Declaration[i++] = D3DVSD_REG(D3DVSDE_POSITION, D3DVSDT_FLOAT3);
     if (FVF & D3DFVF_NORMAL)
         Declaration[i++] = D3DVSD_REG(D3DVSDE_NORMAL, D3DVSDT_FLOAT3);
     if (FVF & D3DFVF_DIFFUSE)

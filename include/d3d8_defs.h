@@ -475,6 +475,7 @@ typedef struct _D3DCAPS8 {
 #define D3DVS_VERSION(_Major,_Minor) (0xFFFE0000 | ((_Major)<<8) | (_Minor))
 
 #define D3DFVF_XYZ    0x002
+#define D3DFVF_XYZRHW 0x004
 #define D3DFVF_NORMAL 0x010
 #define D3DFVF_DIFFUSE 0x040
 #define D3DFVF_SPECULAR 0x080
@@ -490,6 +491,7 @@ typedef struct _D3DCAPS8 {
 
 #define D3DVSDT_FLOAT2 0x01
 #define D3DVSDT_FLOAT3 0x02
+#define D3DVSDT_FLOAT4 0x03
 #define D3DVSDT_D3DCOLOR 0x04
 #define D3DVSDE_POSITION 0
 #define D3DVSDE_NORMAL   3
