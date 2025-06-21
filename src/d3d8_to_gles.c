@@ -365,6 +365,80 @@ D3DXMATRIX* WINAPI D3DXMatrixPerspectiveFovLH(D3DXMATRIX *pOut, FLOAT fovy, FLOA
     return pOut;
 }
 
+D3DXMATRIX* WINAPI D3DXMatrixTranspose(D3DXMATRIX *pOut, CONST D3DXMATRIX *pM) {
+    const D3DXMATRIX *src = pM;
+    D3DXMATRIX temp;
+    if (pOut == pM) {
+        temp = *pM;
+        src = &temp;
+    }
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            pOut->m[i][j] = src->m[j][i];
+        }
+    }
+    return pOut;
+}
+
+D3DXMATRIX* WINAPI D3DXMatrixInverse(D3DXMATRIX *pOut, FLOAT *pDeterminant, CONST D3DXMATRIX *pM) {
+    float m[16] = {
+        pM->_11, pM->_12, pM->_13, pM->_14,
+        pM->_21, pM->_22, pM->_23, pM->_24,
+        pM->_31, pM->_32, pM->_33, pM->_34,
+        pM->_41, pM->_42, pM->_43, pM->_44
+    };
+    float inv[16];
+
+    inv[0] = m[5]  * m[10] * m[15] - m[5]  * m[11] * m[14] - m[9]  * m[6]  * m[15] +
+             m[9]  * m[7]  * m[14] + m[13] * m[6]  * m[11] - m[13] * m[7]  * m[10];
+    inv[4] = -m[4]  * m[10] * m[15] + m[4]  * m[11] * m[14] + m[8]  * m[6]  * m[15] -
+             m[8]  * m[7]  * m[14] - m[12] * m[6]  * m[11] + m[12] * m[7]  * m[10];
+    inv[8] = m[4]  * m[9]  * m[15] - m[4]  * m[11] * m[13] - m[8]  * m[5]  * m[15] +
+             m[8]  * m[7]  * m[13] + m[12] * m[5]  * m[11] - m[12] * m[7]  * m[9];
+    inv[12] = -m[4]  * m[9]  * m[14] + m[4]  * m[10] * m[13] + m[8]  * m[5]  * m[14] -
+              m[8]  * m[6]  * m[13] - m[12] * m[5]  * m[10] + m[12] * m[6]  * m[9];
+    inv[1] = -m[1]  * m[10] * m[15] + m[1]  * m[11] * m[14] + m[9]  * m[2]  * m[15] -
+             m[9]  * m[3]  * m[14] - m[13] * m[2]  * m[11] + m[13] * m[3]  * m[10];
+    inv[5] = m[0]  * m[10] * m[15] - m[0]  * m[11] * m[14] - m[8]  * m[2]  * m[15] +
+             m[8]  * m[3]  * m[14] + m[12] * m[2]  * m[11] - m[12] * m[3]  * m[10];
+    inv[9] = -m[0]  * m[9]  * m[15] + m[0]  * m[11] * m[13] + m[8]  * m[1]  * m[15] -
+             m[8]  * m[3]  * m[13] - m[12] * m[1]  * m[11] + m[12] * m[3]  * m[9];
+    inv[13] = m[0]  * m[9]  * m[14] - m[0]  * m[10] * m[13] - m[8]  * m[1]  * m[14] +
+              m[8]  * m[2]  * m[13] + m[12] * m[1]  * m[10] - m[12] * m[2]  * m[9];
+    inv[2] = m[1]  * m[6]  * m[15] - m[1]  * m[7]  * m[14] - m[5]  * m[2]  * m[15] +
+             m[5]  * m[3]  * m[14] + m[13] * m[2]  * m[7]  - m[13] * m[3]  * m[6];
+    inv[6] = -m[0]  * m[6]  * m[15] + m[0]  * m[7]  * m[14] + m[4]  * m[2]  * m[15] -
+             m[4]  * m[3]  * m[14] - m[12] * m[2]  * m[7]  + m[12] * m[3]  * m[6];
+    inv[10] = m[0]  * m[5]  * m[15] - m[0]  * m[7]  * m[13] - m[4]  * m[1]  * m[15] +
+              m[4]  * m[3]  * m[13] + m[12] * m[1]  * m[7]  - m[12] * m[3]  * m[5];
+    inv[14] = -m[0]  * m[5]  * m[14] + m[0]  * m[6]  * m[13] + m[4]  * m[1]  * m[14] -
+              m[4]  * m[2]  * m[13] - m[12] * m[1]  * m[6]  + m[12] * m[2]  * m[5];
+    inv[3] = -m[1]  * m[6]  * m[11] + m[1]  * m[7]  * m[10] + m[5]  * m[2]  * m[11] -
+             m[5]  * m[3]  * m[10] - m[9]  * m[2]  * m[7]  + m[9]  * m[3]  * m[6];
+    inv[7] = m[0]  * m[6]  * m[11] - m[0]  * m[7]  * m[10] - m[4]  * m[2]  * m[11] +
+             m[4]  * m[3]  * m[10] + m[8]  * m[2]  * m[7]  - m[8]  * m[3]  * m[6];
+    inv[11] = -m[0] * m[5]  * m[11] + m[0] * m[7]  * m[9]  + m[4] * m[1]  * m[11] -
+              m[4] * m[3]  * m[9]  - m[8] * m[1]  * m[7]  + m[8] * m[3]  * m[5];
+    inv[15] = m[0] * m[5]  * m[10] - m[0] * m[6]  * m[9]  - m[4] * m[1]  * m[10] +
+              m[4] * m[2]  * m[9]  + m[8] * m[1]  * m[6]  - m[8] * m[2]  * m[5];
+
+    float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+    if (pDeterminant) *pDeterminant = det;
+    if (fabsf(det) < 1e-6f)
+        return NULL;
+
+    det = 1.0f / det;
+    for (int i = 0; i < 16; i++)
+        inv[i] *= det;
+
+    pOut->_11 = inv[0];  pOut->_12 = inv[1];  pOut->_13 = inv[2];  pOut->_14 = inv[3];
+    pOut->_21 = inv[4];  pOut->_22 = inv[5];  pOut->_23 = inv[6];  pOut->_24 = inv[7];
+    pOut->_31 = inv[8];  pOut->_32 = inv[9];  pOut->_33 = inv[10]; pOut->_34 = inv[11];
+    pOut->_41 = inv[12]; pOut->_42 = inv[13]; pOut->_43 = inv[14]; pOut->_44 = inv[15];
+
+    return pOut;
+}
+
 D3DXVECTOR3* WINAPI D3DXVec3Normalize(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV) {
     float length = sqrtf(pV->x * pV->x + pV->y * pV->y + pV->z * pV->z);
     if (length == 0.0f) {
