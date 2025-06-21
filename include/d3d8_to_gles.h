@@ -136,6 +136,12 @@ typedef struct {
     GLboolean cull_face;
     GLenum cull_mode;
     GLboolean blend;
+    GLenum src_blend;
+    GLenum dest_blend;
+    GLenum depth_func;
+    GLenum alpha_func;
+    GLclampf alpha_ref;
+    GLenum fog_mode;
     GLfloat ambient[4];
     GLuint current_vbo;
     GLuint current_ibo;

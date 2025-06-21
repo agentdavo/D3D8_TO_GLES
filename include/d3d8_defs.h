@@ -73,10 +73,71 @@ typedef enum _D3DCULL {
     D3DCULL_FORCE_DWORD = 0x7fffffff
 } D3DCULL;
 
+typedef enum _D3DBLEND {
+    D3DBLEND_ZERO            = 1,
+    D3DBLEND_ONE             = 2,
+    D3DBLEND_SRCCOLOR        = 3,
+    D3DBLEND_INVSRCCOLOR     = 4,
+    D3DBLEND_SRCALPHA        = 5,
+    D3DBLEND_INVSRCALPHA     = 6,
+    D3DBLEND_DESTALPHA       = 7,
+    D3DBLEND_INVDESTALPHA    = 8,
+    D3DBLEND_DESTCOLOR       = 9,
+    D3DBLEND_INVDESTCOLOR    = 10,
+    D3DBLEND_SRCALPHASAT     = 11,
+    D3DBLEND_BOTHSRCALPHA    = 12,
+    D3DBLEND_BOTHINVSRCALPHA = 13,
+    D3DBLEND_FORCE_DWORD     = 0x7fffffff
+} D3DBLEND;
+
+typedef enum _D3DCMPFUNC {
+    D3DCMP_NEVER        = 1,
+    D3DCMP_LESS         = 2,
+    D3DCMP_EQUAL        = 3,
+    D3DCMP_LESSEQUAL    = 4,
+    D3DCMP_GREATER      = 5,
+    D3DCMP_NOTEQUAL     = 6,
+    D3DCMP_GREATEREQUAL = 7,
+    D3DCMP_ALWAYS       = 8,
+    D3DCMP_FORCE_DWORD  = 0x7fffffff
+} D3DCMPFUNC;
+
+typedef enum _D3DFOGMODE {
+    D3DFOG_NONE        = 0,
+    D3DFOG_EXP         = 1,
+    D3DFOG_EXP2        = 2,
+    D3DFOG_LINEAR      = 3,
+    D3DFOG_FORCE_DWORD = 0x7fffffff
+} D3DFOGMODE;
+
+typedef enum _D3DZBUFFERTYPE {
+    D3DZB_FALSE       = 0,
+    D3DZB_TRUE        = 1,
+    D3DZB_USEW        = 2,
+    D3DZB_FORCE_DWORD = 0x7fffffff
+} D3DZBUFFERTYPE;
+
 typedef enum _D3DRENDERSTATETYPE {
     D3DRS_ZENABLE          = 7,
+    D3DRS_ZWRITEENABLE     = 14,
+    D3DRS_ALPHATESTENABLE  = 15,
+    D3DRS_SRCBLEND         = 19,
+    D3DRS_DESTBLEND        = 20,
     D3DRS_CULLMODE         = 22,
-    D3DRS_ALPHABLENDENABLE = 27
+    D3DRS_ZFUNC            = 23,
+    D3DRS_ALPHAREF         = 24,
+    D3DRS_ALPHAFUNC        = 25,
+    D3DRS_DITHERENABLE     = 26,
+    D3DRS_ALPHABLENDENABLE = 27,
+    D3DRS_FOGENABLE        = 28,
+    D3DRS_FOGCOLOR         = 34,
+    D3DRS_FOGTABLEMODE     = 35,
+    D3DRS_FOGSTART         = 36,
+    D3DRS_FOGEND           = 37,
+    D3DRS_FOGDENSITY       = 38,
+    D3DRS_LIGHTING         = 137,
+    D3DRS_AMBIENT          = 139,
+    D3DRS_FORCE_DWORD      = 0x7fffffff
 } D3DRENDERSTATETYPE;
 
 #define D3DRS_SOFTWAREVERTEXPROCESSING 153
