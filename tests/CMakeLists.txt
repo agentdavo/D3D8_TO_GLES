@@ -21,3 +21,7 @@ add_test(NAME cylinder_stub_test COMMAND cylinder_stub_test)
 add_executable(texture_stage_test texture_stage_test.c)
 target_link_libraries(texture_stage_test PRIVATE d3d8_to_gles)
 add_test(NAME texture_stage_test COMMAND texture_stage_test)
+
+add_executable(color_write_mask_test color_write_mask_test.c)
+target_link_libraries(color_write_mask_test PRIVATE d3d8_to_gles)
+add_test(NAME color_write_mask_test COMMAND color_write_mask_test)
