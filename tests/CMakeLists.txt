@@ -46,6 +46,15 @@ add_executable(texcoord_index_test texcoord_index_test.c)
 target_link_libraries(texcoord_index_test PRIVATE d3d8_to_gles)
 add_test(NAME texcoord_index_test COMMAND texcoord_index_test)
 
+add_executable(triangle_strip_test triangle_strip_test.c)
+target_link_libraries(triangle_strip_test PRIVATE d3d8_to_gles)
+add_test(NAME triangle_strip_test COMMAND triangle_strip_test)
+
+add_executable(point_list_test point_list_test.c)
+target_link_libraries(point_list_test PRIVATE d3d8_to_gles)
+add_test(NAME point_list_test COMMAND point_list_test)
+
 add_executable(buffer_lock_flags_test buffer_lock_flags_test.c)
 target_link_libraries(buffer_lock_flags_test PRIVATE d3d8_to_gles)
 add_test(NAME buffer_lock_flags_test COMMAND buffer_lock_flags_test)
+
