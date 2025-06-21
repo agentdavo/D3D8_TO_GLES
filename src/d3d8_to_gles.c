@@ -232,6 +232,14 @@ static void set_render_state(GLES_Device *gles, D3DRENDERSTATETYPE state, DWORD 
         case D3DRS_FOGDENSITY:
             glFogf(GL_FOG_DENSITY, dword_to_float(value));
             break;
+        case D3DRS_COLORWRITEENABLE: {
+            GLboolean r = (value & D3DCOLORWRITEENABLE_RED) ? GL_TRUE : GL_FALSE;
+            GLboolean g = (value & D3DCOLORWRITEENABLE_GREEN) ? GL_TRUE : GL_FALSE;
+            GLboolean b = (value & D3DCOLORWRITEENABLE_BLUE) ? GL_TRUE : GL_FALSE;
+            GLboolean a = (value & D3DCOLORWRITEENABLE_ALPHA) ? GL_TRUE : GL_FALSE;
+            glColorMask(r, g, b, a);
+            break;
+        }
         case D3DRS_LIGHTING:
             if (value) glEnable(GL_LIGHTING); else glDisable(GL_LIGHTING);
             break;
