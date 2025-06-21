@@ -158,6 +158,7 @@ typedef struct {
     D3DVIEWPORT8 viewport;
     DWORD fvf;
     DWORD attrib_id;
+    DWORD texcoord_index0;
     D3DPRESENT_PARAMETERS present_params;
     D3DDISPLAYMODE display_mode;
 } GLES_Device;

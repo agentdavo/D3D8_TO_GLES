@@ -337,7 +337,8 @@ static void d3d_to_gl_matrix(GLfloat *gl_matrix, const D3DXMATRIX *d3d_matrix) {
 }
 
 // Helper: Setup vertex attributes based on FVF
-static void setup_vertex_attributes(DWORD fvf, BYTE *data, UINT stride) {
+static void setup_vertex_attributes(GLES_Device *gles, DWORD fvf, BYTE *data,
+                                    UINT stride) {
     GLint offset = 0;
 
     if (fvf & D3DFVF_XYZRHW) {
@@ -379,7 +380,15 @@ static void setup_vertex_attributes(DWORD fvf, BYTE *data, UINT stride) {
     int tex_count = (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
     int limit = tex_count > 2 ? 2 : tex_count;
     for (int i = 0; i < limit; i++) {
-        glClientActiveTexture(GL_TEXTURE0 + i);
+        int unit = i;
+        if (gles->texcoord_index0 < limit) {
+            if (i == gles->texcoord_index0) {
+                unit = 0;
+            } else if (i < gles->texcoord_index0) {
+                unit = i + 1;
+            }
+        }
+        glClientActiveTexture(GL_TEXTURE0 + unit);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
         glTexCoordPointer(2, GL_FLOAT, stride, data + offset);
         offset += 8;
@@ -1044,6 +1053,7 @@ static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVT
     gles->stencil_fail = GL_KEEP;
     gles->stencil_zfail = GL_KEEP;
     gles->stencil_pass = GL_KEEP;
+    gles->texcoord_index0 = 0;
     gles->present_params = *pPresentationParameters;
     gles->display_mode.Width = pPresentationParameters->BackBufferWidth;
     gles->display_mode.Height = pPresentationParameters->BackBufferHeight;
@@ -1161,7 +1171,7 @@ static HRESULT D3DAPI d3d8_draw_indexed_primitive(IDirect3DDevice8 *This, D3DPRI
     UINT stride = D3DXGetFVFVertexSize(This->gles->fvf);
     if (This->gles->current_vbo) {
         glBindBuffer(GL_ARRAY_BUFFER, This->gles->current_vbo);
-        setup_vertex_attributes(This->gles->fvf, 0, stride);
+        setup_vertex_attributes(This->gles, This->gles->fvf, 0, stride);
     } else {
         return D3DERR_INVALIDCALL;
     }
@@ -1507,6 +1517,10 @@ static HRESULT D3DAPI d3d8_set_texture_stage_state(IDirect3DDevice8 *This, DWORD
             break;
         case D3DTSS_ALPHAARG2:
             glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_ALPHA, tex_arg_to_gl(Value));
+            break;
+        case D3DTSS_TEXCOORDINDEX:
+            if (Value > 1) return D3DERR_INVALIDCALL;
+            This->gles->texcoord_index0 = Value;
             break;
         default:
             return D3DERR_INVALIDCALL;
