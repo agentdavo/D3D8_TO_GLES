@@ -851,6 +851,11 @@ static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVT
     gles->alpha_ref = 0.0f;
     gles->depth_func = GL_LEQUAL;
     gles->fog_mode = GL_EXP;
+    gles->present_params = *pPresentationParameters;
+    gles->display_mode.Width = pPresentationParameters->BackBufferWidth;
+    gles->display_mode.Height = pPresentationParameters->BackBufferHeight;
+    gles->display_mode.Format = pPresentationParameters->BackBufferFormat;
+    gles->display_mode.RefreshRate = pPresentationParameters->FullScreen_RefreshRateInHz;
 
     IDirect3DDevice8 *device = calloc(1, sizeof(IDirect3DDevice8) + sizeof(IDirect3DDevice8Vtbl));
     if (!device) {
@@ -881,8 +886,20 @@ static HRESULT D3DAPI device_get_device_caps(IDirect3DDevice8 *This, D3DCAPS8 *p
     fill_d3d_caps(pCaps, D3DDEVTYPE_HAL);
     return D3D_OK;
 }
-static HRESULT D3DAPI d3d8_get_display_mode(IDirect3DDevice8 *This, D3DDISPLAYMODE *pMode) { return D3DERR_NOTAVAILABLE; }
-static HRESULT D3DAPI d3d8_get_creation_parameters(IDirect3DDevice8 *This, D3DDEVICE_CREATION_PARAMETERS *pParameters) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_get_display_mode(IDirect3DDevice8 *This, D3DDISPLAYMODE *pMode) {
+    if (!pMode) return D3DERR_INVALIDCALL;
+    *pMode = This->gles->display_mode;
+    return D3D_OK;
+}
+
+static HRESULT D3DAPI d3d8_get_creation_parameters(IDirect3DDevice8 *This, D3DDEVICE_CREATION_PARAMETERS *pParameters) {
+    if (!pParameters) return D3DERR_INVALIDCALL;
+    pParameters->AdapterOrdinal = D3DADAPTER_DEFAULT;
+    pParameters->DeviceType = D3DDEVTYPE_HAL;
+    pParameters->hFocusWindow = This->gles->present_params.hDeviceWindow;
+    pParameters->BehaviorFlags = 0;
+    return D3D_OK;
+}
 static HRESULT D3DAPI d3d8_set_cursor_properties(IDirect3DDevice8 *This, UINT XHotSpot, UINT YHotSpot, IDirect3DSurface8 *pCursorBitmap) { return D3DERR_NOTAVAILABLE; }
 static void D3DAPI d3d8_set_cursor_position(IDirect3DDevice8 *This, UINT XScreenSpace, UINT YScreenSpace, DWORD Flags) {}
 static BOOL D3DAPI d3d8_show_cursor(IDirect3DDevice8 *This, BOOL bShow) { return FALSE; }
