@@ -33,3 +33,7 @@ add_test(NAME stencil_enable_test COMMAND stencil_enable_test)
 add_executable(xyzrhw_test xyzrhw_test.c)
 target_link_libraries(xyzrhw_test PRIVATE d3d8_to_gles)
 add_test(NAME xyzrhw_test COMMAND xyzrhw_test)
+
+add_executable(adapter_info_test adapter_info_test.c)
+target_link_libraries(adapter_info_test PRIVATE d3d8_to_gles)
+add_test(NAME adapter_info_test COMMAND adapter_info_test)
