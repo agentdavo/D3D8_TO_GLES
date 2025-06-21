@@ -41,3 +41,7 @@ add_test(NAME adapter_info_test COMMAND adapter_info_test)
 add_executable(tex2_coord_test tex2_coord_test.c)
 target_link_libraries(tex2_coord_test PRIVATE d3d8_to_gles)
 add_test(NAME tex2_coord_test COMMAND tex2_coord_test)
+
+add_executable(texcoord_index_test texcoord_index_test.c)
+target_link_libraries(texcoord_index_test PRIVATE d3d8_to_gles)
+add_test(NAME texcoord_index_test COMMAND texcoord_index_test)
