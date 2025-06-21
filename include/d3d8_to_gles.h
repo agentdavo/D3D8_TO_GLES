@@ -308,6 +308,7 @@ typedef struct {
     HRESULT (D3DAPI *CreateIndexBuffer)(IDirect3DDevice8 *This, UINT Length, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DIndexBuffer8 **ppIndexBuffer);
     HRESULT (D3DAPI *CreateTexture)(IDirect3DDevice8 *This, UINT Width, UINT Height, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DTexture8 **ppTexture);
     HRESULT (D3DAPI *SetTexture)(IDirect3DDevice8 *This, DWORD Stage, IDirect3DTexture8 *pTexture);
+    HRESULT (D3DAPI *SetTextureStageState)(IDirect3DDevice8 *This, DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value);
     HRESULT (D3DAPI *SetRenderState)(IDirect3DDevice8 *This, D3DRENDERSTATETYPE State, DWORD Value);
     HRESULT (D3DAPI *BeginScene)(IDirect3DDevice8 *This);
     HRESULT (D3DAPI *EndScene)(IDirect3DDevice8 *This);
