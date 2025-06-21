@@ -29,3 +29,7 @@ add_test(NAME color_write_mask_test COMMAND color_write_mask_test)
 add_executable(stencil_enable_test stencil_enable_test.c)
 target_link_libraries(stencil_enable_test PRIVATE d3d8_to_gles)
 add_test(NAME stencil_enable_test COMMAND stencil_enable_test)
+
+add_executable(xyzrhw_test xyzrhw_test.c)
+target_link_libraries(xyzrhw_test PRIVATE d3d8_to_gles)
+add_test(NAME xyzrhw_test COMMAND xyzrhw_test)
