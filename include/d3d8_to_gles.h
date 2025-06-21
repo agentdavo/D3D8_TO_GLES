@@ -142,6 +142,13 @@ typedef struct {
     GLenum alpha_func;
     GLclampf alpha_ref;
     GLenum fog_mode;
+    GLboolean stencil_test;
+    GLenum stencil_func;
+    GLint stencil_ref;
+    GLuint stencil_mask;
+    GLenum stencil_fail;
+    GLenum stencil_zfail;
+    GLenum stencil_pass;
     GLfloat ambient[4];
     GLuint current_vbo;
     GLuint current_ibo;
