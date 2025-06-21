@@ -104,6 +104,9 @@ static DWORD d3dx_buffer_get_buffer_size(ID3DXBuffer *This);
 UINT WINAPI D3DXGetFVFVertexSize(DWORD FVF);
 HRESULT WINAPI D3DXDeclaratorFromFVF(DWORD FVF, DWORD Declaration[MAX_FVF_DECL_SIZE]);
 
+// Last created device's display mode for adapter queries
+static D3DDISPLAYMODE g_current_display_mode;
+
 static float dword_to_float(DWORD v) {
     union {
         DWORD d;
@@ -947,9 +950,31 @@ static const IDirect3DDevice8Vtbl device_vtbl = {
 };
 static HRESULT D3DAPI d3d8_register_software_device(IDirect3D8 *This, void *pInitializeFunction) { return D3DERR_NOTAVAILABLE; }
 static UINT D3DAPI d3d8_get_adapter_count(IDirect3D8 *This) { return 1; }
-static HRESULT D3DAPI d3d8_get_adapter_identifier(IDirect3D8 *This, UINT Adapter, DWORD Flags, D3DADAPTER_IDENTIFIER8 *pIdentifier) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_get_adapter_identifier(IDirect3D8 *This,
+                                                  UINT Adapter,
+                                                  DWORD Flags,
+                                                  D3DADAPTER_IDENTIFIER8 *pIdentifier) {
+    if (Adapter != D3DADAPTER_DEFAULT || !pIdentifier) return D3DERR_INVALIDCALL;
+
+    memset(pIdentifier, 0, sizeof(*pIdentifier));
+    strncpy(pIdentifier->Driver, "d3d8_to_gles", sizeof(pIdentifier->Driver) - 1);
+
+    const char *vendor = (const char *)glGetString(GL_VENDOR);
+    if (!vendor) vendor = "Unknown";
+    strncpy(pIdentifier->Description, vendor, sizeof(pIdentifier->Description) - 1);
+
+    return D3D_OK;
+}
 static UINT D3DAPI d3d8_get_adapter_mode_count(IDirect3D8 *This, UINT Adapter) { return 1; }
-static HRESULT D3DAPI d3d8_enum_adapter_modes(IDirect3D8 *This, UINT Adapter, UINT Mode, D3DDISPLAYMODE *pMode) { return D3DERR_NOTAVAILABLE; }
+static HRESULT D3DAPI d3d8_enum_adapter_modes(IDirect3D8 *This,
+                                              UINT Adapter,
+                                              UINT Mode,
+                                              D3DDISPLAYMODE *pMode) {
+    if (Adapter != D3DADAPTER_DEFAULT || Mode > 0 || !pMode) return D3DERR_INVALIDCALL;
+
+    *pMode = g_current_display_mode;
+    return D3D_OK;
+}
 static HRESULT D3DAPI d3d8_get_adapter_display_mode(IDirect3D8 *This, UINT Adapter, D3DDISPLAYMODE *pMode) { return D3DERR_NOTAVAILABLE; }
 static HRESULT D3DAPI d3d8_check_device_type(IDirect3D8 *This, UINT Adapter, D3DDEVTYPE CheckType, D3DFORMAT DisplayFormat, D3DFORMAT BackBufferFormat, BOOL Windowed) { return D3D_OK; }
 static HRESULT D3DAPI d3d8_check_device_format(IDirect3D8 *This, UINT Adapter, D3DDEVTYPE DeviceType, D3DFORMAT AdapterFormat, DWORD Usage, D3DRESOURCETYPE RType, D3DFORMAT CheckFormat) { return D3D_OK; }
@@ -1024,6 +1049,8 @@ static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVT
     gles->display_mode.Height = pPresentationParameters->BackBufferHeight;
     gles->display_mode.Format = pPresentationParameters->BackBufferFormat;
     gles->display_mode.RefreshRate = pPresentationParameters->FullScreen_RefreshRateInHz;
+
+    g_current_display_mode = gles->display_mode;
 
     IDirect3DDevice8 *device = calloc(1, sizeof(IDirect3DDevice8) + sizeof(IDirect3DDevice8Vtbl));
     if (!device) {
