@@ -144,6 +144,20 @@ static GLenum cmp_to_gl(D3DCMPFUNC func) {
     }
 }
 
+static GLenum stencil_op_to_gl(D3DSTENCILOP op) {
+    switch (op) {
+        case D3DSTENCILOP_KEEP: return GL_KEEP;
+        case D3DSTENCILOP_ZERO: return GL_ZERO;
+        case D3DSTENCILOP_REPLACE: return GL_REPLACE;
+        case D3DSTENCILOP_INCRSAT: return GL_INCR;
+        case D3DSTENCILOP_DECRSAT: return GL_DECR;
+        case D3DSTENCILOP_INVERT: return GL_INVERT;
+        case D3DSTENCILOP_INCR: return GL_INCR;
+        case D3DSTENCILOP_DECR: return GL_DECR;
+        default: return GL_KEEP;
+    }
+}
+
 static GLenum fog_mode_to_gl(D3DFOGMODE mode) {
     switch (mode) {
         case D3DFOG_EXP: return GL_EXP;
@@ -231,6 +245,37 @@ static void set_render_state(GLES_Device *gles, D3DRENDERSTATETYPE state, DWORD 
             break;
         case D3DRS_FOGDENSITY:
             glFogf(GL_FOG_DENSITY, dword_to_float(value));
+            break;
+        case D3DRS_STENCILENABLE:
+            gles->stencil_test = value;
+            if (value) glEnable(GL_STENCIL_TEST); else glDisable(GL_STENCIL_TEST);
+            break;
+        case D3DRS_STENCILFUNC:
+            gles->stencil_func = cmp_to_gl((D3DCMPFUNC)value);
+            glStencilFunc(gles->stencil_func, gles->stencil_ref, gles->stencil_mask);
+            break;
+        case D3DRS_STENCILREF:
+            gles->stencil_ref = (GLint)value;
+            glStencilFunc(gles->stencil_func, gles->stencil_ref, gles->stencil_mask);
+            break;
+        case D3DRS_STENCILMASK:
+            gles->stencil_mask = value;
+            glStencilFunc(gles->stencil_func, gles->stencil_ref, gles->stencil_mask);
+            break;
+        case D3DRS_STENCILWRITEMASK:
+            glStencilMask(value);
+            break;
+        case D3DRS_STENCILFAIL:
+            gles->stencil_fail = stencil_op_to_gl((D3DSTENCILOP)value);
+            glStencilOp(gles->stencil_fail, gles->stencil_zfail, gles->stencil_pass);
+            break;
+        case D3DRS_STENCILZFAIL:
+            gles->stencil_zfail = stencil_op_to_gl((D3DSTENCILOP)value);
+            glStencilOp(gles->stencil_fail, gles->stencil_zfail, gles->stencil_pass);
+            break;
+        case D3DRS_STENCILPASS:
+            gles->stencil_pass = stencil_op_to_gl((D3DSTENCILOP)value);
+            glStencilOp(gles->stencil_fail, gles->stencil_zfail, gles->stencil_pass);
             break;
         case D3DRS_COLORWRITEENABLE: {
             GLboolean r = (value & D3DCOLORWRITEENABLE_RED) ? GL_TRUE : GL_FALSE;
@@ -959,6 +1004,13 @@ static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVT
     gles->alpha_ref = 0.0f;
     gles->depth_func = GL_LEQUAL;
     gles->fog_mode = GL_EXP;
+    gles->stencil_test = GL_FALSE;
+    gles->stencil_func = GL_ALWAYS;
+    gles->stencil_ref = 0;
+    gles->stencil_mask = 0xFFFFFFFFu;
+    gles->stencil_fail = GL_KEEP;
+    gles->stencil_zfail = GL_KEEP;
+    gles->stencil_pass = GL_KEEP;
     gles->present_params = *pPresentationParameters;
     gles->display_mode.Width = pPresentationParameters->BackBufferWidth;
     gles->display_mode.Height = pPresentationParameters->BackBufferHeight;
