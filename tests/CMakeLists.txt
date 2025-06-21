@@ -13,3 +13,11 @@ add_test(NAME box_render_test COMMAND box_render_test)
 add_executable(sphere_stub_test sphere_stub_test.c)
 target_link_libraries(sphere_stub_test PRIVATE d3d8_to_gles)
 add_test(NAME sphere_stub_test COMMAND sphere_stub_test)
+
+add_executable(cylinder_stub_test cylinder_stub_test.c)
+target_link_libraries(cylinder_stub_test PRIVATE d3d8_to_gles)
+add_test(NAME cylinder_stub_test COMMAND cylinder_stub_test)
+
+add_executable(texture_stage_test texture_stage_test.c)
+target_link_libraries(texture_stage_test PRIVATE d3d8_to_gles)
+add_test(NAME texture_stage_test COMMAND texture_stage_test)
