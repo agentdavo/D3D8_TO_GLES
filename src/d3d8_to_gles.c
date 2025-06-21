@@ -1155,7 +1155,24 @@ static HRESULT D3DAPI d3d8_set_transform(IDirect3DDevice8 *This, D3DTRANSFORMSTA
 }
 
 static HRESULT D3DAPI d3d8_draw_indexed_primitive(IDirect3DDevice8 *This, D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount) {
-    if (PrimitiveType != D3DPT_TRIANGLELIST) return D3DERR_NOTAVAILABLE;
+    GLenum mode;
+    GLsizei count;
+    switch (PrimitiveType) {
+        case D3DPT_TRIANGLELIST:
+            mode = GL_TRIANGLES;
+            count = PrimitiveCount * 3;
+            break;
+        case D3DPT_TRIANGLESTRIP:
+            mode = GL_TRIANGLE_STRIP;
+            count = PrimitiveCount + 2;
+            break;
+        case D3DPT_POINTLIST:
+            mode = GL_POINTS;
+            count = PrimitiveCount;
+            break;
+        default:
+            return D3DERR_NOTAVAILABLE;
+    }
 
     // Apply transformations
     D3DXMATRIX wvp;
@@ -1177,9 +1194,9 @@ static HRESULT D3DAPI d3d8_draw_indexed_primitive(IDirect3DDevice8 *This, D3DPRI
     }
 
     // Draw
-    GLenum mode = GL_TRIANGLES;
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, This->gles->current_ibo);
-    glDrawElements(mode, PrimitiveCount * 3, GL_UNSIGNED_SHORT, (void *)(StartIndex * sizeof(WORD)));
+    glDrawElements(mode, count, GL_UNSIGNED_SHORT,
+                   (void *)(StartIndex * sizeof(WORD)));
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
