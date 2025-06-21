@@ -377,13 +377,14 @@ static void setup_vertex_attributes(DWORD fvf, BYTE *data, UINT stride) {
     }
 
     int tex_count = (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
-    for (int i = 0; i < tex_count && i < 2; i++) {
+    int limit = tex_count > 2 ? 2 : tex_count;
+    for (int i = 0; i < limit; i++) {
         glClientActiveTexture(GL_TEXTURE0 + i);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
         glTexCoordPointer(2, GL_FLOAT, stride, data + offset);
         offset += 8;
     }
-    for (int i = tex_count; i < 2; i++) {
+    for (int i = limit; i < 2; i++) {
         glClientActiveTexture(GL_TEXTURE0 + i);
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
     }
@@ -1581,7 +1582,7 @@ UINT WINAPI D3DXGetFVFVertexSize(DWORD FVF) {
 
     UINT tex_count = (FVF & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
     if (tex_count > 2) return 0;
-    size += tex_count * 2 * sizeof(float);
+    size += tex_count * 2 * sizeof(float); // each texcoord set is 2 floats
     return size;
 }
 

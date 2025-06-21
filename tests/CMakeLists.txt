@@ -37,3 +37,7 @@ add_test(NAME xyzrhw_test COMMAND xyzrhw_test)
 add_executable(adapter_info_test adapter_info_test.c)
 target_link_libraries(adapter_info_test PRIVATE d3d8_to_gles)
 add_test(NAME adapter_info_test COMMAND adapter_info_test)
+
+add_executable(tex2_coord_test tex2_coord_test.c)
+target_link_libraries(tex2_coord_test PRIVATE d3d8_to_gles)
+add_test(NAME tex2_coord_test COMMAND tex2_coord_test)
