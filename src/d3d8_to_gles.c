@@ -104,6 +104,55 @@ static DWORD d3dx_buffer_get_buffer_size(ID3DXBuffer *This);
 UINT WINAPI D3DXGetFVFVertexSize(DWORD FVF);
 HRESULT WINAPI D3DXDeclaratorFromFVF(DWORD FVF, DWORD Declaration[MAX_FVF_DECL_SIZE]);
 
+static float dword_to_float(DWORD v) {
+    union {
+        DWORD d;
+        float f;
+    } u;
+    u.d = v;
+    return u.f;
+}
+
+static GLenum blend_to_gl(D3DBLEND blend) {
+    switch (blend) {
+        case D3DBLEND_ZERO: return GL_ZERO;
+        case D3DBLEND_ONE: return GL_ONE;
+        case D3DBLEND_SRCCOLOR: return GL_SRC_COLOR;
+        case D3DBLEND_INVSRCCOLOR: return GL_ONE_MINUS_SRC_COLOR;
+        case D3DBLEND_SRCALPHA: return GL_SRC_ALPHA;
+        case D3DBLEND_INVSRCALPHA: return GL_ONE_MINUS_SRC_ALPHA;
+        case D3DBLEND_DESTALPHA: return GL_DST_ALPHA;
+        case D3DBLEND_INVDESTALPHA: return GL_ONE_MINUS_DST_ALPHA;
+        case D3DBLEND_DESTCOLOR: return GL_DST_COLOR;
+        case D3DBLEND_INVDESTCOLOR: return GL_ONE_MINUS_DST_COLOR;
+        case D3DBLEND_SRCALPHASAT: return GL_SRC_ALPHA_SATURATE;
+        default: return GL_ONE;
+    }
+}
+
+static GLenum cmp_to_gl(D3DCMPFUNC func) {
+    switch (func) {
+        case D3DCMP_NEVER: return GL_NEVER;
+        case D3DCMP_LESS: return GL_LESS;
+        case D3DCMP_EQUAL: return GL_EQUAL;
+        case D3DCMP_LESSEQUAL: return GL_LEQUAL;
+        case D3DCMP_GREATER: return GL_GREATER;
+        case D3DCMP_NOTEQUAL: return GL_NOTEQUAL;
+        case D3DCMP_GREATEREQUAL: return GL_GEQUAL;
+        case D3DCMP_ALWAYS: return GL_ALWAYS;
+        default: return GL_ALWAYS;
+    }
+}
+
+static GLenum fog_mode_to_gl(D3DFOGMODE mode) {
+    switch (mode) {
+        case D3DFOG_EXP: return GL_EXP;
+        case D3DFOG_EXP2: return GL_EXP2;
+        case D3DFOG_LINEAR: return GL_LINEAR;
+        default: return GL_EXP;
+    }
+}
+
 // Helper: Map Direct3D render state to OpenGL ES
 static void set_render_state(GLES_Device *gles, D3DRENDERSTATETYPE state, DWORD value) {
     switch (state) {
@@ -111,6 +160,21 @@ static void set_render_state(GLES_Device *gles, D3DRENDERSTATETYPE state, DWORD 
             gles->depth_test = value;
             if (value) glEnable(GL_DEPTH_TEST);
             else glDisable(GL_DEPTH_TEST);
+            break;
+        case D3DRS_ZWRITEENABLE:
+            glDepthMask(value ? GL_TRUE : GL_FALSE);
+            break;
+        case D3DRS_ALPHATESTENABLE:
+            if (value) glEnable(GL_ALPHA_TEST);
+            else glDisable(GL_ALPHA_TEST);
+            break;
+        case D3DRS_SRCBLEND:
+            gles->src_blend = blend_to_gl((D3DBLEND)value);
+            glBlendFunc(gles->src_blend, gles->dest_blend);
+            break;
+        case D3DRS_DESTBLEND:
+            gles->dest_blend = blend_to_gl((D3DBLEND)value);
+            glBlendFunc(gles->src_blend, gles->dest_blend);
             break;
         case D3DRS_CULLMODE:
             gles->cull_face = (value != D3DCULL_NONE);
@@ -122,10 +186,61 @@ static void set_render_state(GLES_Device *gles, D3DRENDERSTATETYPE state, DWORD 
                 glDisable(GL_CULL_FACE);
             }
             break;
+        case D3DRS_ZFUNC:
+            gles->depth_func = cmp_to_gl((D3DCMPFUNC)value);
+            glDepthFunc(gles->depth_func);
+            break;
+        case D3DRS_ALPHAREF:
+            gles->alpha_ref = dword_to_float(value);
+            glAlphaFunc(gles->alpha_func, gles->alpha_ref);
+            break;
+        case D3DRS_ALPHAFUNC:
+            gles->alpha_func = cmp_to_gl((D3DCMPFUNC)value);
+            glAlphaFunc(gles->alpha_func, gles->alpha_ref);
+            break;
+        case D3DRS_DITHERENABLE:
+            if (value) glEnable(GL_DITHER); else glDisable(GL_DITHER);
+            break;
         case D3DRS_ALPHABLENDENABLE:
             gles->blend = value;
             if (value) glEnable(GL_BLEND);
             else glDisable(GL_BLEND);
+            break;
+        case D3DRS_FOGENABLE:
+            if (value) glEnable(GL_FOG); else glDisable(GL_FOG);
+            break;
+        case D3DRS_FOGCOLOR: {
+            GLfloat color[4] = {
+                (value & 0xFF) / 255.0f,
+                ((value >> 8) & 0xFF) / 255.0f,
+                ((value >> 16) & 0xFF) / 255.0f,
+                ((value >> 24) & 0xFF) / 255.0f,
+            };
+            glFogfv(GL_FOG_COLOR, color);
+            break;
+        }
+        case D3DRS_FOGTABLEMODE:
+            gles->fog_mode = fog_mode_to_gl((D3DFOGMODE)value);
+            glFogf(GL_FOG_MODE, (GLfloat)gles->fog_mode);
+            break;
+        case D3DRS_FOGSTART:
+            glFogf(GL_FOG_START, dword_to_float(value));
+            break;
+        case D3DRS_FOGEND:
+            glFogf(GL_FOG_END, dword_to_float(value));
+            break;
+        case D3DRS_FOGDENSITY:
+            glFogf(GL_FOG_DENSITY, dword_to_float(value));
+            break;
+        case D3DRS_LIGHTING:
+            if (value) glEnable(GL_LIGHTING); else glDisable(GL_LIGHTING);
+            break;
+        case D3DRS_AMBIENT:
+            gles->ambient[0] = (value & 0xFF) / 255.0f;
+            gles->ambient[1] = ((value >> 8) & 0xFF) / 255.0f;
+            gles->ambient[2] = ((value >> 16) & 0xFF) / 255.0f;
+            gles->ambient[3] = ((value >> 24) & 0xFF) / 255.0f;
+            glLightModelfv(GL_LIGHT_MODEL_AMBIENT, gles->ambient);
             break;
         default:
             d3d8_gles_log("Unsupported render state: %d\n", state);
@@ -730,6 +845,12 @@ static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVT
     D3DXMatrixIdentity(&gles->world_matrix);
     D3DXMatrixIdentity(&gles->view_matrix);
     D3DXMatrixIdentity(&gles->projection_matrix);
+    gles->src_blend = GL_ONE;
+    gles->dest_blend = GL_ZERO;
+    gles->alpha_func = GL_ALWAYS;
+    gles->alpha_ref = 0.0f;
+    gles->depth_func = GL_LEQUAL;
+    gles->fog_mode = GL_EXP;
 
     IDirect3DDevice8 *device = calloc(1, sizeof(IDirect3DDevice8) + sizeof(IDirect3DDevice8Vtbl));
     if (!device) {
