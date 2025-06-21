@@ -45,3 +45,11 @@ add_test(NAME tex2_coord_test COMMAND tex2_coord_test)
 add_executable(texcoord_index_test texcoord_index_test.c)
 target_link_libraries(texcoord_index_test PRIVATE d3d8_to_gles)
 add_test(NAME texcoord_index_test COMMAND texcoord_index_test)
+
+add_executable(color_mask_draw_test color_mask_draw_test.c)
+target_link_libraries(color_mask_draw_test PRIVATE d3d8_to_gles)
+add_test(NAME color_mask_draw_test COMMAND color_mask_draw_test)
+
+add_executable(stencil_mask_draw_test stencil_mask_draw_test.c)
+target_link_libraries(stencil_mask_draw_test PRIVATE d3d8_to_gles)
+add_test(NAME stencil_mask_draw_test COMMAND stencil_mask_draw_test)
