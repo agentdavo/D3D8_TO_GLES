@@ -43,6 +43,7 @@ static HRESULT D3DAPI d3d8_set_stream_source(IDirect3DDevice8 *This, UINT Stream
 static HRESULT D3DAPI d3d8_set_indices(IDirect3DDevice8 *This, IDirect3DIndexBuffer8 *pIndexData, UINT BaseVertexIndex);
 static HRESULT D3DAPI d3d8_create_texture(IDirect3DDevice8 *This, UINT Width, UINT Height, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DTexture8 **ppTexture);
 static HRESULT D3DAPI d3d8_set_texture(IDirect3DDevice8 *This, DWORD Stage, IDirect3DTexture8 *pTexture);
+static HRESULT D3DAPI d3d8_set_texture_stage_state(IDirect3DDevice8 *This, DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value);
 static HRESULT D3DAPI d3d8_set_viewport(IDirect3DDevice8 *This, CONST D3DVIEWPORT8 *pViewport);
 static HRESULT D3DAPI d3d8_set_transform(IDirect3DDevice8 *This, D3DTRANSFORMSTATETYPE State, CONST D3DXMATRIX *pMatrix);
 static HRESULT D3DAPI d3d8_draw_indexed_primitive(IDirect3DDevice8 *This, D3DPRIMITIVETYPE PrimitiveType, UINT MinVertexIndex, UINT NumVertices, UINT StartIndex, UINT PrimitiveCount);
@@ -658,6 +659,7 @@ static const IDirect3DDevice8Vtbl device_vtbl = {
     .CreateIndexBuffer = d3d8_create_index_buffer,
     .CreateTexture = d3d8_create_texture,
     .SetTexture = d3d8_set_texture,
+    .SetTextureStageState = d3d8_set_texture_stage_state,
     .SetRenderState = d3d8_set_render_state,
     .BeginScene = d3d8_begin_scene,
     .EndScene = d3d8_end_scene,
@@ -1109,6 +1111,73 @@ static HRESULT D3DAPI d3d8_set_texture(IDirect3DDevice8 *This, DWORD Stage, IDir
     }
     glBindTexture(GL_TEXTURE_2D, pTexture->texture->tex_id);
     glEnable(GL_TEXTURE_2D);
+    return D3D_OK;
+}
+
+static GLenum tex_arg_to_gl(DWORD arg) {
+    switch (arg & D3DTA_SELECTMASK) {
+        case D3DTA_DIFFUSE: return GL_PRIMARY_COLOR;
+        case D3DTA_CURRENT: return GL_PREVIOUS;
+        case D3DTA_TEXTURE: return GL_TEXTURE;
+        default: return GL_TEXTURE;
+    }
+}
+
+static HRESULT D3DAPI d3d8_set_texture_stage_state(IDirect3DDevice8 *This, DWORD Stage, D3DTEXTURESTAGESTATETYPE Type, DWORD Value) {
+    if (Stage != 0) return D3DERR_INVALIDCALL;
+
+    switch (Type) {
+        case D3DTSS_COLOROP:
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+            switch (Value) {
+                case D3DTOP_MODULATE:
+                    glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_MODULATE);
+                    break;
+                case D3DTOP_SELECTARG1:
+                    glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
+                    glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, GL_TEXTURE);
+                    break;
+                case D3DTOP_SELECTARG2:
+                    glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB, GL_REPLACE);
+                    glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, GL_PREVIOUS);
+                    break;
+                default:
+                    return D3DERR_INVALIDCALL;
+            }
+            break;
+        case D3DTSS_COLORARG1:
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_RGB, tex_arg_to_gl(Value));
+            break;
+        case D3DTSS_COLORARG2:
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_RGB, tex_arg_to_gl(Value));
+            break;
+        case D3DTSS_ALPHAOP:
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE);
+            switch (Value) {
+                case D3DTOP_MODULATE:
+                    glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_MODULATE);
+                    break;
+                case D3DTOP_SELECTARG1:
+                    glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_REPLACE);
+                    glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, GL_TEXTURE);
+                    break;
+                case D3DTOP_SELECTARG2:
+                    glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_ALPHA, GL_REPLACE);
+                    glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, GL_PREVIOUS);
+                    break;
+                default:
+                    return D3DERR_INVALIDCALL;
+            }
+            break;
+        case D3DTSS_ALPHAARG1:
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC0_ALPHA, tex_arg_to_gl(Value));
+            break;
+        case D3DTSS_ALPHAARG2:
+            glTexEnvi(GL_TEXTURE_ENV, GL_SRC1_ALPHA, tex_arg_to_gl(Value));
+            break;
+        default:
+            return D3DERR_INVALIDCALL;
+    }
     return D3D_OK;
 }
 
