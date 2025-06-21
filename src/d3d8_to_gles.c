@@ -966,7 +966,10 @@ static HRESULT D3DAPI d3d8_get_adapter_identifier(IDirect3D8 *This,
     if (Adapter != D3DADAPTER_DEFAULT || !pIdentifier) return D3DERR_INVALIDCALL;
 
     memset(pIdentifier, 0, sizeof(*pIdentifier));
-    strncpy(pIdentifier->Driver, "d3d8_to_gles", sizeof(pIdentifier->Driver) - 1);
+
+    const char *renderer = (const char *)glGetString(GL_RENDERER);
+    if (!renderer) renderer = "d3d8_to_gles";
+    strncpy(pIdentifier->Driver, renderer, sizeof(pIdentifier->Driver) - 1);
 
     const char *vendor = (const char *)glGetString(GL_VENDOR);
     if (!vendor) vendor = "Unknown";
@@ -979,7 +982,8 @@ static HRESULT D3DAPI d3d8_enum_adapter_modes(IDirect3D8 *This,
                                               UINT Adapter,
                                               UINT Mode,
                                               D3DDISPLAYMODE *pMode) {
-    if (Adapter != D3DADAPTER_DEFAULT || Mode > 0 || !pMode) return D3DERR_INVALIDCALL;
+    if (Adapter != D3DADAPTER_DEFAULT || Mode > 0 || !pMode)
+        return D3DERR_INVALIDCALL;
 
     *pMode = g_current_display_mode;
     return D3D_OK;
@@ -1338,11 +1342,19 @@ static D3DRESOURCETYPE D3DAPI d3d8_vb_get_type(IDirect3DVertexBuffer8 *This) { r
 
 static HRESULT D3DAPI d3d8_vb_lock(IDirect3DVertexBuffer8 *This, UINT OffsetToLock, UINT SizeToLock, BYTE **ppbData, DWORD Flags) {
     GLES_Buffer *buffer = This->buffer;
-    SizeToLock = (SizeToLock == 0) ? buffer->length : SizeToLock;
+    if (SizeToLock == 0) SizeToLock = buffer->length - OffsetToLock;
 
-    buffer->temp_buffer = malloc(SizeToLock);
+    buffer->lock_offset = OffsetToLock;
+    buffer->lock_size = SizeToLock;
+
+    buffer->temp_buffer = malloc(buffer->length);
     if (!buffer->temp_buffer) return D3DERR_OUTOFVIDEOMEMORY;
 
+    glBindBuffer(GL_ARRAY_BUFFER, buffer->vbo_id);
+    if (Flags & D3DLOCK_DISCARD) {
+        GLenum usage = (buffer->usage & D3DUSAGE_DYNAMIC) ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
+        glBufferData(GL_ARRAY_BUFFER, buffer->length, NULL, usage);
+    }
     *ppbData = buffer->temp_buffer + OffsetToLock;
     return D3D_OK;
 }
@@ -1352,7 +1364,8 @@ static HRESULT D3DAPI d3d8_vb_unlock(IDirect3DVertexBuffer8 *This) {
     if (!buffer->temp_buffer) return D3DERR_INVALIDCALL;
 
     glBindBuffer(GL_ARRAY_BUFFER, buffer->vbo_id);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, buffer->length, buffer->temp_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, buffer->lock_offset, buffer->lock_size,
+                    buffer->temp_buffer + buffer->lock_offset);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     free(buffer->temp_buffer);
@@ -1385,11 +1398,19 @@ static D3DRESOURCETYPE D3DAPI d3d8_ib_get_type(IDirect3DIndexBuffer8 *This) { re
 
 static HRESULT D3DAPI d3d8_ib_lock(IDirect3DIndexBuffer8 *This, UINT OffsetToLock, UINT SizeToLock, BYTE **ppbData, DWORD Flags) {
     GLES_Buffer *buffer = This->buffer;
-    SizeToLock = (SizeToLock == 0) ? buffer->length : SizeToLock;
+    if (SizeToLock == 0) SizeToLock = buffer->length - OffsetToLock;
 
-    buffer->temp_buffer = malloc(SizeToLock);
+    buffer->lock_offset = OffsetToLock;
+    buffer->lock_size = SizeToLock;
+
+    buffer->temp_buffer = malloc(buffer->length);
     if (!buffer->temp_buffer) return D3DERR_OUTOFVIDEOMEMORY;
 
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer->vbo_id);
+    if (Flags & D3DLOCK_DISCARD) {
+        GLenum usage = (buffer->usage & D3DUSAGE_DYNAMIC) ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, buffer->length, NULL, usage);
+    }
     *ppbData = buffer->temp_buffer + OffsetToLock;
     return D3D_OK;
 }
@@ -1399,7 +1420,8 @@ static HRESULT D3DAPI d3d8_ib_unlock(IDirect3DIndexBuffer8 *This) {
     if (!buffer->temp_buffer) return D3DERR_INVALIDCALL;
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer->vbo_id);
-    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, buffer->length, buffer->temp_buffer);
+    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, buffer->lock_offset, buffer->lock_size,
+                    buffer->temp_buffer + buffer->lock_offset);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
     free(buffer->temp_buffer);
