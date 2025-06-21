@@ -409,6 +409,18 @@ FLOAT WINAPI D3DXVec3Dot(CONST D3DXVECTOR3 *pV1, CONST D3DXVECTOR3 *pV2) {
     return pV1->x * pV2->x + pV1->y * pV2->y + pV1->z * pV2->z;
 }
 
+FLOAT WINAPI D3DXVec4Dot(CONST D3DXVECTOR4 *pV1, CONST D3DXVECTOR4 *pV2) {
+    return pV1->x * pV2->x + pV1->y * pV2->y + pV1->z * pV2->z + pV1->w * pV2->w;
+}
+
+D3DXVECTOR4* WINAPI D3DXVec4Transform(D3DXVECTOR4 *pOut, CONST D3DXVECTOR4 *pV, CONST D3DXMATRIX *pM) {
+    pOut->x = pV->x * pM->_11 + pV->y * pM->_21 + pV->z * pM->_31 + pV->w * pM->_41;
+    pOut->y = pV->x * pM->_12 + pV->y * pM->_22 + pV->z * pM->_32 + pV->w * pM->_42;
+    pOut->z = pV->x * pM->_13 + pV->y * pM->_23 + pV->z * pM->_33 + pV->w * pM->_43;
+    pOut->w = pV->x * pM->_14 + pV->y * pM->_24 + pV->z * pM->_34 + pV->w * pM->_44;
+    return pOut;
+}
+
 // ID3DXMatrixStack methods
 static HRESULT D3DAPI d3dx_matrix_stack_query_interface(ID3DXMatrixStack *This, REFIID riid, LPVOID *ppvObj) {
     return D3DERR_INVALIDCALL;
