@@ -172,6 +172,8 @@ typedef struct {
     D3DFORMAT format;
     D3DPOOL pool;
     BYTE *temp_buffer;
+    UINT lock_offset;
+    UINT lock_size;
 } GLES_Buffer;
 
 typedef struct {

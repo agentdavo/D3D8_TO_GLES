@@ -1325,11 +1325,19 @@ static D3DRESOURCETYPE D3DAPI d3d8_vb_get_type(IDirect3DVertexBuffer8 *This) { r
 
 static HRESULT D3DAPI d3d8_vb_lock(IDirect3DVertexBuffer8 *This, UINT OffsetToLock, UINT SizeToLock, BYTE **ppbData, DWORD Flags) {
     GLES_Buffer *buffer = This->buffer;
-    SizeToLock = (SizeToLock == 0) ? buffer->length : SizeToLock;
+    if (SizeToLock == 0) SizeToLock = buffer->length - OffsetToLock;
 
-    buffer->temp_buffer = malloc(SizeToLock);
+    buffer->lock_offset = OffsetToLock;
+    buffer->lock_size = SizeToLock;
+
+    buffer->temp_buffer = malloc(buffer->length);
     if (!buffer->temp_buffer) return D3DERR_OUTOFVIDEOMEMORY;
 
+    glBindBuffer(GL_ARRAY_BUFFER, buffer->vbo_id);
+    if (Flags & D3DLOCK_DISCARD) {
+        GLenum usage = (buffer->usage & D3DUSAGE_DYNAMIC) ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
+        glBufferData(GL_ARRAY_BUFFER, buffer->length, NULL, usage);
+    }
     *ppbData = buffer->temp_buffer + OffsetToLock;
     return D3D_OK;
 }
@@ -1339,7 +1347,8 @@ static HRESULT D3DAPI d3d8_vb_unlock(IDirect3DVertexBuffer8 *This) {
     if (!buffer->temp_buffer) return D3DERR_INVALIDCALL;
 
     glBindBuffer(GL_ARRAY_BUFFER, buffer->vbo_id);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, buffer->length, buffer->temp_buffer);
+    glBufferSubData(GL_ARRAY_BUFFER, buffer->lock_offset, buffer->lock_size,
+                    buffer->temp_buffer + buffer->lock_offset);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     free(buffer->temp_buffer);
@@ -1372,11 +1381,19 @@ static D3DRESOURCETYPE D3DAPI d3d8_ib_get_type(IDirect3DIndexBuffer8 *This) { re
 
 static HRESULT D3DAPI d3d8_ib_lock(IDirect3DIndexBuffer8 *This, UINT OffsetToLock, UINT SizeToLock, BYTE **ppbData, DWORD Flags) {
     GLES_Buffer *buffer = This->buffer;
-    SizeToLock = (SizeToLock == 0) ? buffer->length : SizeToLock;
+    if (SizeToLock == 0) SizeToLock = buffer->length - OffsetToLock;
 
-    buffer->temp_buffer = malloc(SizeToLock);
+    buffer->lock_offset = OffsetToLock;
+    buffer->lock_size = SizeToLock;
+
+    buffer->temp_buffer = malloc(buffer->length);
     if (!buffer->temp_buffer) return D3DERR_OUTOFVIDEOMEMORY;
 
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer->vbo_id);
+    if (Flags & D3DLOCK_DISCARD) {
+        GLenum usage = (buffer->usage & D3DUSAGE_DYNAMIC) ? GL_DYNAMIC_DRAW : GL_STATIC_DRAW;
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, buffer->length, NULL, usage);
+    }
     *ppbData = buffer->temp_buffer + OffsetToLock;
     return D3D_OK;
 }
@@ -1386,7 +1403,8 @@ static HRESULT D3DAPI d3d8_ib_unlock(IDirect3DIndexBuffer8 *This) {
     if (!buffer->temp_buffer) return D3DERR_INVALIDCALL;
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buffer->vbo_id);
-    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, buffer->length, buffer->temp_buffer);
+    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, buffer->lock_offset, buffer->lock_size,
+                    buffer->temp_buffer + buffer->lock_offset);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 
     free(buffer->temp_buffer);
