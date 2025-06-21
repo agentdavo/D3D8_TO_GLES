@@ -141,6 +141,8 @@ typedef struct {
     GLenum depth_func;
     GLenum alpha_func;
     GLclampf alpha_ref;
+    GLint zbias;
+    D3DFILLMODE fill_mode;
     GLenum fog_mode;
     GLfloat ambient[4];
     GLuint current_vbo;

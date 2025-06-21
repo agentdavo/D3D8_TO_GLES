@@ -73,6 +73,13 @@ typedef enum _D3DCULL {
     D3DCULL_FORCE_DWORD = 0x7fffffff
 } D3DCULL;
 
+typedef enum _D3DFILLMODE {
+    D3DFILL_POINT      = 1,
+    D3DFILL_WIREFRAME  = 2,
+    D3DFILL_SOLID      = 3,
+    D3DFILL_FORCE_DWORD = 0x7fffffff
+} D3DFILLMODE;
+
 typedef enum _D3DBLEND {
     D3DBLEND_ZERO            = 1,
     D3DBLEND_ONE             = 2,
@@ -119,8 +126,10 @@ typedef enum _D3DZBUFFERTYPE {
 
 typedef enum _D3DRENDERSTATETYPE {
     D3DRS_ZENABLE          = 7,
+    D3DRS_FILLMODE        = 8,
     D3DRS_ZWRITEENABLE     = 14,
     D3DRS_ALPHATESTENABLE  = 15,
+    D3DRS_LASTPIXEL       = 16,
     D3DRS_SRCBLEND         = 19,
     D3DRS_DESTBLEND        = 20,
     D3DRS_CULLMODE         = 22,
@@ -135,6 +144,7 @@ typedef enum _D3DRENDERSTATETYPE {
     D3DRS_FOGSTART         = 36,
     D3DRS_FOGEND           = 37,
     D3DRS_FOGDENSITY       = 38,
+    D3DRS_ZBIAS            = 47,
     D3DRS_LIGHTING         = 137,
     D3DRS_AMBIENT          = 139,
     D3DRS_FORCE_DWORD      = 0x7fffffff

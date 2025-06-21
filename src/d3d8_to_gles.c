@@ -161,6 +161,9 @@ static void set_render_state(GLES_Device *gles, D3DRENDERSTATETYPE state, DWORD 
             if (value) glEnable(GL_DEPTH_TEST);
             else glDisable(GL_DEPTH_TEST);
             break;
+        case D3DRS_FILLMODE:
+            gles->fill_mode = (D3DFILLMODE)value;
+            break;
         case D3DRS_ZWRITEENABLE:
             glDepthMask(value ? GL_TRUE : GL_FALSE);
             break;
@@ -231,6 +234,15 @@ static void set_render_state(GLES_Device *gles, D3DRENDERSTATETYPE state, DWORD 
             break;
         case D3DRS_FOGDENSITY:
             glFogf(GL_FOG_DENSITY, dword_to_float(value));
+            break;
+        case D3DRS_ZBIAS:
+            gles->zbias = (GLint)value;
+            if (value) {
+                glEnable(GL_POLYGON_OFFSET_FILL);
+                glPolygonOffset((GLfloat)value, (GLfloat)value);
+            } else {
+                glDisable(GL_POLYGON_OFFSET_FILL);
+            }
             break;
         case D3DRS_COLORWRITEENABLE: {
             GLboolean r = (value & D3DCOLORWRITEENABLE_RED) ? GL_TRUE : GL_FALSE;
@@ -957,6 +969,8 @@ static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVT
     gles->dest_blend = GL_ZERO;
     gles->alpha_func = GL_ALWAYS;
     gles->alpha_ref = 0.0f;
+    gles->zbias = 0;
+    gles->fill_mode = D3DFILL_SOLID;
     gles->depth_func = GL_LEQUAL;
     gles->fog_mode = GL_EXP;
     gles->present_params = *pPresentationParameters;
@@ -1080,9 +1094,16 @@ static HRESULT D3DAPI d3d8_draw_indexed_primitive(IDirect3DDevice8 *This, D3DPRI
     }
 
     // Draw
-    GLenum mode = GL_TRIANGLES;
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, This->gles->current_ibo);
-    glDrawElements(mode, PrimitiveCount * 3, GL_UNSIGNED_SHORT, (void *)(StartIndex * sizeof(WORD)));
+    if (This->gles->fill_mode == D3DFILL_WIREFRAME) {
+        for (UINT i = 0; i < PrimitiveCount; i++) {
+            glDrawElements(GL_LINE_LOOP, 3, GL_UNSIGNED_SHORT,
+                           (void *)((StartIndex + i * 3) * sizeof(WORD)));
+        }
+    } else {
+        glDrawElements(GL_TRIANGLES, PrimitiveCount * 3, GL_UNSIGNED_SHORT,
+                       (void *)(StartIndex * sizeof(WORD)));
+    }
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);

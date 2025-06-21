@@ -25,3 +25,7 @@ add_test(NAME texture_stage_test COMMAND texture_stage_test)
 add_executable(color_write_mask_test color_write_mask_test.c)
 target_link_libraries(color_write_mask_test PRIVATE d3d8_to_gles)
 add_test(NAME color_write_mask_test COMMAND color_write_mask_test)
+
+add_executable(wireframe_zbias_test wireframe_zbias_test.c)
+target_link_libraries(wireframe_zbias_test PRIVATE d3d8_to_gles)
+add_test(NAME wireframe_zbias_test COMMAND wireframe_zbias_test)
