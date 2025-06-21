@@ -151,6 +151,8 @@ typedef struct {
     D3DVIEWPORT8 viewport;
     DWORD fvf;
     DWORD attrib_id;
+    D3DPRESENT_PARAMETERS present_params;
+    D3DDISPLAYMODE display_mode;
 } GLES_Device;
 
 // Vertex/index buffer structure
