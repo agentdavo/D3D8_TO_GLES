@@ -966,7 +966,10 @@ static HRESULT D3DAPI d3d8_get_adapter_identifier(IDirect3D8 *This,
     if (Adapter != D3DADAPTER_DEFAULT || !pIdentifier) return D3DERR_INVALIDCALL;
 
     memset(pIdentifier, 0, sizeof(*pIdentifier));
-    strncpy(pIdentifier->Driver, "d3d8_to_gles", sizeof(pIdentifier->Driver) - 1);
+
+    const char *renderer = (const char *)glGetString(GL_RENDERER);
+    if (!renderer) renderer = "d3d8_to_gles";
+    strncpy(pIdentifier->Driver, renderer, sizeof(pIdentifier->Driver) - 1);
 
     const char *vendor = (const char *)glGetString(GL_VENDOR);
     if (!vendor) vendor = "Unknown";
@@ -979,7 +982,8 @@ static HRESULT D3DAPI d3d8_enum_adapter_modes(IDirect3D8 *This,
                                               UINT Adapter,
                                               UINT Mode,
                                               D3DDISPLAYMODE *pMode) {
-    if (Adapter != D3DADAPTER_DEFAULT || Mode > 0 || !pMode) return D3DERR_INVALIDCALL;
+    if (Adapter != D3DADAPTER_DEFAULT || Mode > 0 || !pMode)
+        return D3DERR_INVALIDCALL;
 
     *pMode = g_current_display_mode;
     return D3D_OK;
