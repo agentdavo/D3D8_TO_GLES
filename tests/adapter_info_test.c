@@ -25,9 +25,13 @@ int main(void) {
     D3DADAPTER_IDENTIFIER8 ident;
     hr = d3d->lpVtbl->GetAdapterIdentifier(d3d, D3DADAPTER_DEFAULT, 0, &ident);
     assert(hr == D3D_OK && "GetAdapterIdentifier failed");
+
     const char *vendor = (const char *)glGetString(GL_VENDOR);
-    assert(vendor && "glGetString failed");
+    const char *renderer = (const char *)glGetString(GL_RENDERER);
+    assert(vendor && renderer && "glGetString failed");
+
     assert(strcmp(ident.Description, vendor) == 0);
+    assert(strcmp(ident.Driver, renderer) == 0);
 
     D3DDISPLAYMODE mode;
     hr = d3d->lpVtbl->EnumAdapterModes(d3d, D3DADAPTER_DEFAULT, 0, &mode);
