@@ -283,6 +283,7 @@ static void d3d_to_gl_matrix(GLfloat *gl_matrix, const D3DXMATRIX *d3d_matrix) {
 // Helper: Setup vertex attributes based on FVF
 static void setup_vertex_attributes(DWORD fvf, BYTE *data, UINT stride) {
     GLint offset = 0;
+
     if (fvf & D3DFVF_XYZ) {
         glEnableClientState(GL_VERTEX_ARRAY);
         glVertexPointer(3, GL_FLOAT, stride, data + offset);
@@ -290,6 +291,7 @@ static void setup_vertex_attributes(DWORD fvf, BYTE *data, UINT stride) {
     } else {
         glDisableClientState(GL_VERTEX_ARRAY);
     }
+
     if (fvf & D3DFVF_NORMAL) {
         glEnableClientState(GL_NORMAL_ARRAY);
         glNormalPointer(GL_FLOAT, stride, data + offset);
@@ -297,6 +299,7 @@ static void setup_vertex_attributes(DWORD fvf, BYTE *data, UINT stride) {
     } else {
         glDisableClientState(GL_NORMAL_ARRAY);
     }
+
     if (fvf & D3DFVF_DIFFUSE) {
         glEnableClientState(GL_COLOR_ARRAY);
         glColorPointer(4, GL_UNSIGNED_BYTE, stride, data + offset);
@@ -304,13 +307,24 @@ static void setup_vertex_attributes(DWORD fvf, BYTE *data, UINT stride) {
     } else {
         glDisableClientState(GL_COLOR_ARRAY);
     }
-    if (fvf & D3DFVF_TEX1) {
+
+    if (fvf & D3DFVF_SPECULAR) {
+        /* Skip specular color for now; GL ES 1.1 lacks secondary color arrays */
+        offset += 4;
+    }
+
+    int tex_count = (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+    for (int i = 0; i < tex_count && i < 2; i++) {
+        glClientActiveTexture(GL_TEXTURE0 + i);
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
         glTexCoordPointer(2, GL_FLOAT, stride, data + offset);
         offset += 8;
-    } else {
+    }
+    for (int i = tex_count; i < 2; i++) {
+        glClientActiveTexture(GL_TEXTURE0 + i);
         glDisableClientState(GL_TEXTURE_COORD_ARRAY);
     }
+    glClientActiveTexture(GL_TEXTURE0);
 }
 
 // Math functions
@@ -1462,20 +1476,26 @@ static DWORD d3dx_buffer_get_buffer_size(ID3DXBuffer *This) {
 UINT WINAPI D3DXGetFVFVertexSize(DWORD FVF) {
     if (!(FVF & D3DFVF_XYZ)) return 0;
 
-    if (FVF & ~(D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE | D3DFVF_TEX1))
+    if (FVF & ~(D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE | D3DFVF_SPECULAR |
+                 D3DFVF_TEX1 | D3DFVF_TEX2))
         return 0;
 
     UINT size = 3 * sizeof(float);
     if (FVF & D3DFVF_NORMAL) size += 3 * sizeof(float);
     if (FVF & D3DFVF_DIFFUSE) size += sizeof(DWORD);
-    if (FVF & D3DFVF_TEX1) size += 2 * sizeof(float);
+    if (FVF & D3DFVF_SPECULAR) size += sizeof(DWORD);
+
+    UINT tex_count = (FVF & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+    if (tex_count > 2) return 0;
+    size += tex_count * 2 * sizeof(float);
     return size;
 }
 
 HRESULT WINAPI D3DXDeclaratorFromFVF(DWORD FVF,
                                      DWORD Declaration[MAX_FVF_DECL_SIZE]) {
     if (!(FVF & D3DFVF_XYZ)) return D3DERR_INVALIDCALL;
-    if (FVF & ~(D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE | D3DFVF_TEX1))
+    if (FVF & ~(D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_DIFFUSE | D3DFVF_SPECULAR |
+                D3DFVF_TEX1 | D3DFVF_TEX2))
         return D3DERR_INVALIDCALL;
 
     int i = 0;
@@ -1485,8 +1505,14 @@ HRESULT WINAPI D3DXDeclaratorFromFVF(DWORD FVF,
         Declaration[i++] = D3DVSD_REG(D3DVSDE_NORMAL, D3DVSDT_FLOAT3);
     if (FVF & D3DFVF_DIFFUSE)
         Declaration[i++] = D3DVSD_REG(D3DVSDE_DIFFUSE, D3DVSDT_D3DCOLOR);
-    if (FVF & D3DFVF_TEX1)
+    if (FVF & D3DFVF_SPECULAR)
+        Declaration[i++] = D3DVSD_REG(D3DVSDE_SPECULAR, D3DVSDT_D3DCOLOR);
+
+    UINT tex_count = (FVF & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+    if (tex_count > 0)
         Declaration[i++] = D3DVSD_REG(D3DVSDE_TEXCOORD0, D3DVSDT_FLOAT2);
+    if (tex_count > 1)
+        Declaration[i++] = D3DVSD_REG(D3DVSDE_TEXCOORD1, D3DVSDT_FLOAT2);
     Declaration[i++] = D3DVSD_END();
 
     for (; i < MAX_FVF_DECL_SIZE; i++) Declaration[i] = D3DVSD_END();

@@ -452,8 +452,11 @@ typedef struct _D3DCAPS8 {
 #define D3DFVF_XYZ    0x002
 #define D3DFVF_NORMAL 0x010
 #define D3DFVF_DIFFUSE 0x040
+#define D3DFVF_SPECULAR 0x080
 #define D3DFVF_TEX1   0x100
+#define D3DFVF_TEX2   0x200
 #define D3DFVF_TEXCOUNT_MASK 0xF00
+#define D3DFVF_TEXCOUNT_SHIFT 8
 
 #define D3DVSD_STREAM(_StreamNumber) ((DWORD)((0 << 29) | (_StreamNumber)))
 #define D3DVSD_REG(_VertexRegister, _Type) \
@@ -466,7 +469,9 @@ typedef struct _D3DCAPS8 {
 #define D3DVSDE_POSITION 0
 #define D3DVSDE_NORMAL   3
 #define D3DVSDE_DIFFUSE  5
+#define D3DVSDE_SPECULAR 6
 #define D3DVSDE_TEXCOORD0 7
+#define D3DVSDE_TEXCOORD1 8
 
 #define D3DUSAGE_WRITEONLY    0x00000008L
 #define D3DUSAGE_DYNAMIC      0x00000200L
