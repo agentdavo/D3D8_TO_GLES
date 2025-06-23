@@ -30,10 +30,14 @@ if(HEADER_ONLY)
     add_library(d3d8_to_gles INTERFACE)
     target_include_directories(d3d8_to_gles INTERFACE ${CMAKE_SOURCE_DIR}/include)
 else()
-    add_library(d3d8_to_gles STATIC ${SOURCES})
+add_library(d3d8_to_gles STATIC ${SOURCES})
     target_include_directories(d3d8_to_gles PUBLIC ${CMAKE_SOURCE_DIR}/include)
     target_link_libraries(d3d8_to_gles PUBLIC ${GLESv1_CM_LIBRARY} ${EGL_LIBRARY} m)
 endif()
+
+# Example command line tool for choosing EGL configs
+add_executable(egl_config_cli tools/egl_config_cli.c)
+target_link_libraries(egl_config_cli PRIVATE d3d8_to_gles)
 
 # Enable error logging
 option(ENABLE_LOGGING "Enable internal logging" ON)
