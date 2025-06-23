@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdalign.h>
+#include <EGL/eglext.h>
 
 #ifdef D3D8_GLES_LOGGING
 #include <stdio.h>
@@ -14,6 +16,8 @@ void d3d8_gles_log(const char *format, ...) {
     va_end(args);
 }
 #endif
+
+_Thread_local alignas(64) static D3DXMATRIX temp_matrix;
 
 // Map OpenGL ES 1.1 capabilities to D3DCAPS8
 void fill_d3d_caps(D3DCAPS8 *pCaps, D3DDEVTYPE DeviceType) {
@@ -378,7 +382,9 @@ static void set_render_state(GLES_Device *gles, D3DRENDERSTATETYPE state, DWORD 
 }
 
 // Helper: Map D3DPRESENT_PARAMETERS to EGL config
-static EGLConfig choose_egl_config(EGLDisplay display, D3DPRESENT_PARAMETERS *params) {
+static EGLConfig choose_egl_config(EGLDisplay display,
+                                   D3DPRESENT_PARAMETERS *params,
+                                   BOOL want_window) {
     EGLint config_attributes[] = {
         EGL_RED_SIZE, (params->BackBufferFormat == D3DFMT_A8R8G8B8 || params->BackBufferFormat == D3DFMT_X8R8G8B8) ? 8 : 5,
         EGL_GREEN_SIZE, (params->BackBufferFormat == D3DFMT_A8R8G8B8 || params->BackBufferFormat == D3DFMT_X8R8G8B8) ? 8 : 6,
@@ -386,7 +392,7 @@ static EGLConfig choose_egl_config(EGLDisplay display, D3DPRESENT_PARAMETERS *pa
         EGL_ALPHA_SIZE, (params->BackBufferFormat == D3DFMT_A8R8G8B8) ? 8 : 0,
         EGL_DEPTH_SIZE, params->EnableAutoDepthStencil ? 16 : 0,
         EGL_STENCIL_SIZE, params->EnableAutoDepthStencil ? 8 : 0,
-        EGL_SURFACE_TYPE, params->Windowed ? EGL_WINDOW_BIT : EGL_PBUFFER_BIT,
+        EGL_SURFACE_TYPE, want_window ? EGL_WINDOW_BIT : EGL_PBUFFER_BIT,
         EGL_RENDERABLE_TYPE, EGL_OPENGL_ES_BIT,
         EGL_SAMPLES, params->MultiSampleType >= D3DMULTISAMPLE_2_SAMPLES ? params->MultiSampleType : 0,
         EGL_NONE
@@ -402,7 +408,8 @@ static EGLConfig choose_egl_config(EGLDisplay display, D3DPRESENT_PARAMETERS *pa
 }
 
 // Helper: Convert Direct3D matrix to OpenGL (left-handed to right-handed, z=[0,1] to [-1,1])
-static void d3d_to_gl_matrix(GLfloat *gl_matrix, const D3DXMATRIX *d3d_matrix) {
+static void d3d_to_gl_matrix(GLfloat *restrict gl_matrix,
+                             const D3DXMATRIX *restrict d3d_matrix) {
     // Transpose and adjust for coordinate system differences
     gl_matrix[0] = d3d_matrix->_11; gl_matrix[4] = d3d_matrix->_21; gl_matrix[8] = d3d_matrix->_31; gl_matrix[12] = d3d_matrix->_41;
     gl_matrix[1] = d3d_matrix->_12; gl_matrix[5] = d3d_matrix->_22; gl_matrix[9] = d3d_matrix->_32; gl_matrix[13] = d3d_matrix->_42;
@@ -481,17 +488,19 @@ D3DXMATRIX* WINAPI D3DXMatrixIdentity(D3DXMATRIX *pOut) {
     return pOut;
 }
 
-D3DXMATRIX* WINAPI D3DXMatrixMultiply(D3DXMATRIX *pOut, CONST D3DXMATRIX *pM1, CONST D3DXMATRIX *pM2) {
-    D3DXMATRIX result;
+D3DXMATRIX* WINAPI D3DXMatrixMultiply(D3DXMATRIX *restrict pOut,
+                                      CONST D3DXMATRIX *restrict pM1,
+                                      CONST D3DXMATRIX *restrict pM2) {
+    D3DXMATRIX *restrict result = &temp_matrix;
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
-            result.m[i][j] = pM1->m[i][0] * pM2->m[0][j] +
-                             pM1->m[i][1] * pM2->m[1][j] +
-                             pM1->m[i][2] * pM2->m[2][j] +
-                             pM1->m[i][3] * pM2->m[3][j];
+            result->m[i][j] = pM1->m[i][0] * pM2->m[0][j] +
+                              pM1->m[i][1] * pM2->m[1][j] +
+                              pM1->m[i][2] * pM2->m[2][j] +
+                              pM1->m[i][3] * pM2->m[3][j];
         }
     }
-    *pOut = result;
+    *pOut = *result;
     return pOut;
 }
 
@@ -612,7 +621,9 @@ D3DXVECTOR3* WINAPI D3DXVec3Normalize(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV) 
     return pOut;
 }
 
-D3DXVECTOR3* WINAPI D3DXVec3TransformCoord(D3DXVECTOR3 *pOut, CONST D3DXVECTOR3 *pV, CONST D3DXMATRIX *pM) {
+D3DXVECTOR3* WINAPI D3DXVec3TransformCoord(D3DXVECTOR3 *restrict pOut,
+                                           CONST D3DXVECTOR3 *restrict pV,
+                                           CONST D3DXMATRIX *restrict pM) {
     D3DXVECTOR4 temp = { pV->x, pV->y, pV->z, 1.0f };
     pOut->x = temp.x * pM->_11 + temp.y * pM->_21 + temp.z * pM->_31 + temp.w * pM->_41;
     pOut->y = temp.x * pM->_12 + temp.y * pM->_22 + temp.z * pM->_32 + temp.w * pM->_42;
@@ -648,7 +659,9 @@ FLOAT WINAPI D3DXVec4Dot(CONST D3DXVECTOR4 *pV1, CONST D3DXVECTOR4 *pV2) {
     return pV1->x * pV2->x + pV1->y * pV2->y + pV1->z * pV2->z + pV1->w * pV2->w;
 }
 
-D3DXVECTOR4* WINAPI D3DXVec4Transform(D3DXVECTOR4 *pOut, CONST D3DXVECTOR4 *pV, CONST D3DXMATRIX *pM) {
+D3DXVECTOR4* WINAPI D3DXVec4Transform(D3DXVECTOR4 *restrict pOut,
+                                      CONST D3DXVECTOR4 *restrict pV,
+                                      CONST D3DXMATRIX *restrict pM) {
     pOut->x = pV->x * pM->_11 + pV->y * pM->_21 + pV->z * pM->_31 + pV->w * pM->_41;
     pOut->y = pV->x * pM->_12 + pV->y * pM->_22 + pV->z * pM->_32 + pV->w * pM->_42;
     pOut->z = pV->x * pM->_13 + pV->y * pM->_23 + pV->z * pM->_33 + pV->w * pM->_43;
@@ -1086,19 +1099,36 @@ static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVT
 
     gles->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (!eglInitialize(gles->display, NULL, NULL)) {
-        free(gles);
-        return D3DERR_INVALIDCALL;
+        gles->display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA,
+                                              EGL_DEFAULT_DISPLAY, NULL);
+        if (!eglInitialize(gles->display, NULL, NULL)) {
+            free(gles);
+            return D3DERR_INVALIDCALL;
+        }
     }
 
-    EGLConfig config = choose_egl_config(gles->display, pPresentationParameters);
+    BOOL want_window = hFocusWindow != NULL;
+    EGLConfig config =
+        choose_egl_config(gles->display, pPresentationParameters, want_window);
     if (!config) {
         eglTerminate(gles->display);
         free(gles);
         return D3DERR_INVALIDCALL;
     }
 
-    gles->surface = eglCreateWindowSurface(gles->display, config,
-                                           (EGLNativeWindowType)(uintptr_t)hFocusWindow, NULL);
+    if (hFocusWindow) {
+        gles->surface = eglCreateWindowSurface(
+            gles->display, config,
+            (EGLNativeWindowType)(uintptr_t)hFocusWindow, NULL);
+    } else {
+        const EGLint pbuffer_attribs[] = {EGL_WIDTH,
+                                          pPresentationParameters->BackBufferWidth,
+                                          EGL_HEIGHT,
+                                          pPresentationParameters->BackBufferHeight,
+                                          EGL_NONE};
+        gles->surface =
+            eglCreatePbufferSurface(gles->display, config, pbuffer_attribs);
+    }
     gles->context = eglCreateContext(gles->display, config, EGL_NO_CONTEXT, NULL);
     if (!gles->surface || !gles->context || !eglMakeCurrent(gles->display, gles->surface, gles->surface, gles->context)) {
         if (gles->context) eglDestroyContext(gles->display, gles->context);
