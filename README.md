@@ -46,12 +46,15 @@ The build produces a static library (`libd3d8_to_gles.a`) in `build/`.
        IDirect3D8 *d3d = Direct3DCreate8(D3D_SDK_VERSION);
        D3DPRESENT_PARAMETERS pp = { /* configure */ };
        IDirect3DDevice8 *device;
-       d3d->lpVtbl->CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, NULL, 0, &pp, &device);
+   d3d->lpVtbl->CreateDevice(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, NULL, 0, &pp, &device);
        // Set transforms, create mesh, render
-       d3d->lpVtbl->Release(d3d);
-       return 0;
-   }
-   ```
+   d3d->lpVtbl->Release(d3d);
+   return 0;
+}
+```
+
+Passing `NULL` for the window handle lets the shim create an offscreen EGL
+pbuffer surface, which is useful when running unit tests or headless tools.
 
 ## Directory Structure
 ```

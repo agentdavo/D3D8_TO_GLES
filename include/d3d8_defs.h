@@ -305,6 +305,7 @@ typedef struct _D3DXMATRIX {
         float m[4][4];
     };
 } D3DXMATRIX, *LPD3DXMATRIX;
+_Static_assert(sizeof(D3DXMATRIX) == 64, "D3DXMATRIX must be 64 bytes");
 
 typedef struct _D3DADAPTER_IDENTIFIER8 {
     char  Driver[512];
