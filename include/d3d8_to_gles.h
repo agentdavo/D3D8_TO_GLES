@@ -441,6 +441,7 @@ FLOAT WINAPI D3DXVec3Dot(CONST D3DXVECTOR3 *pV1, CONST D3DXVECTOR3 *pV2);
 
 // Entry point
 IDirect3D8 *D3DAPI Direct3DCreate8(UINT SDKVersion);
+void fill_d3d_caps(D3DCAPS8 *pCaps, D3DDEVTYPE DeviceType);
 
 #ifdef D3D8_GLES_LOGGING
 void d3d8_gles_log(const char *format, ...);
