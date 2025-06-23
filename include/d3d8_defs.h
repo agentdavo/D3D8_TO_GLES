@@ -506,6 +506,16 @@ typedef struct _D3DCAPS8 {
 #define D3DUSAGE_RENDERTARGET 0x00000001L
 #define D3DUSAGE_DEPTHSTENCIL 0x00000002L
 
+#ifndef D3DLOCK_READONLY
+#define D3DLOCK_READONLY       0x00000010L
+#endif
+#ifndef D3DLOCK_DISCARD
+#define D3DLOCK_DISCARD        0x00002000L
+#endif
+#ifndef D3DLOCK_NOOVERWRITE
+#define D3DLOCK_NOOVERWRITE    0x00001000L
+#endif
+
 #ifdef __cplusplus
 }
 #endif
