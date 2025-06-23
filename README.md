@@ -72,6 +72,11 @@ developing or verifying the shim’s interfaces. The shim is compiled only
 against the headers in `include/` and does **not** use the SDK headers when
 building.
 
+## Tests
+Unit tests reside in the `tests/` directory and can be executed with `ctest`.
+Recent additions cover color write masks via `D3DRS_COLORWRITEENABLE` and
+basic stencil operations with a masked draw.
+
 ## Contributing
 See `AGENTS.md` for guidance on extending the shim, especially for AI-assisted contributions. Key areas for improvement:
 - Implement additional D3DX shapes (e.g., `D3DXCreateSphere`).

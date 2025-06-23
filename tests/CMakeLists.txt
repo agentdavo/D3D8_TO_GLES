@@ -46,6 +46,14 @@ add_executable(texcoord_index_test texcoord_index_test.c)
 target_link_libraries(texcoord_index_test PRIVATE d3d8_to_gles)
 add_test(NAME texcoord_index_test COMMAND texcoord_index_test)
 
+add_executable(color_mask_draw_test color_mask_draw_test.c)
+target_link_libraries(color_mask_draw_test PRIVATE d3d8_to_gles)
+add_test(NAME color_mask_draw_test COMMAND color_mask_draw_test)
+
+add_executable(stencil_mask_draw_test stencil_mask_draw_test.c)
+target_link_libraries(stencil_mask_draw_test PRIVATE d3d8_to_gles)
+add_test(NAME stencil_mask_draw_test COMMAND stencil_mask_draw_test)
+
 add_executable(triangle_strip_test triangle_strip_test.c)
 target_link_libraries(triangle_strip_test PRIVATE d3d8_to_gles)
 add_test(NAME triangle_strip_test COMMAND triangle_strip_test)
@@ -57,4 +65,3 @@ add_test(NAME point_list_test COMMAND point_list_test)
 add_executable(buffer_lock_flags_test buffer_lock_flags_test.c)
 target_link_libraries(buffer_lock_flags_test PRIVATE d3d8_to_gles)
 add_test(NAME buffer_lock_flags_test COMMAND buffer_lock_flags_test)
-
