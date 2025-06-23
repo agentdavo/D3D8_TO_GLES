@@ -1,4 +1,5 @@
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <d3d8_to_gles.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,7 +90,17 @@ int main(int argc, char **argv) {
     }
   }
 
-  EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+  EGLDisplay display = EGL_NO_DISPLAY;
+  if (getenv("DISPLAY")) {
+    display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if (!eglInitialize(display, NULL, NULL)) {
+      display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA,
+                                      EGL_DEFAULT_DISPLAY, NULL);
+    }
+  } else {
+    display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA,
+                                    EGL_DEFAULT_DISPLAY, NULL);
+  }
   if (!eglInitialize(display, NULL, NULL)) {
     fprintf(stderr, "Failed to initialize EGL\n");
     return 1;
