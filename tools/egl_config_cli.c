@@ -94,12 +94,16 @@ int main(int argc, char **argv) {
   if (getenv("DISPLAY")) {
     display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (!eglInitialize(display, NULL, NULL)) {
-      display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA,
-                                      EGL_DEFAULT_DISPLAY, NULL);
+      display = eglGetPlatformDisplay(
+          EGL_PLATFORM_SURFACELESS_MESA,
+          (void *)(intptr_t)EGL_DEFAULT_DISPLAY,
+          NULL);
     }
   } else {
-    display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA,
-                                    EGL_DEFAULT_DISPLAY, NULL);
+    display = eglGetPlatformDisplay(
+        EGL_PLATFORM_SURFACELESS_MESA,
+        (void *)(intptr_t)EGL_DEFAULT_DISPLAY,
+        NULL);
   }
   if (!eglInitialize(display, NULL, NULL)) {
     fprintf(stderr, "Failed to initialize EGL\n");

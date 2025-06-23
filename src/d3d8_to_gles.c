@@ -1099,8 +1099,10 @@ static HRESULT D3DAPI d3d8_create_device(IDirect3D8 *This, UINT Adapter, D3DDEVT
 
     gles->display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (!eglInitialize(gles->display, NULL, NULL)) {
-        gles->display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA,
-                                              EGL_DEFAULT_DISPLAY, NULL);
+        gles->display =
+            eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA,
+                                  (void *)(intptr_t)EGL_DEFAULT_DISPLAY,
+                                  NULL);
         if (!eglInitialize(gles->display, NULL, NULL)) {
             free(gles);
             return D3DERR_INVALIDCALL;
